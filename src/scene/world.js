@@ -6,6 +6,7 @@ import { setDRL } from './bodyShell.js';
 import { Infrared } from './infrared.js';
 import { Walker } from './walk.js';
 import { addProps } from './props.js';
+import { Surroundings } from './surroundings.js';
 import { buildBody } from './vanBody.js';
 import { buildComponents } from './interior.js';
 import { buildSystems, Flows } from './systems.js';
@@ -47,6 +48,7 @@ export class World {
     this.flows.addSet('electrical', this.systems.routes.filter((r) => r.sys === 'electrical'), { radius: 0.013, spacing: 0.28 });
     this.flows.addSet('ducts', this.systems.routes.filter((r) => r.sys === 'air'), { radius: 0.024, spacing: 0.45, soft: 0.6 });
     this.flows.addSet('air', this.systems.air, { radius: 0.03, spacing: 0.5, soft: 1 });
+    this.surroundings = new Surroundings(scene);
     this.viz = new Viz(scene);
     this.person = new Person();
     scene.add(this.person.root);
@@ -133,6 +135,7 @@ export class World {
   weather(scn, wx, hour) {
     applyWeather(this.stage, scn, wx, hour);
     this.sunDir.copy(sunDirection(scn, wx, hour));
+    this.surroundings.setScenario(scn.id, wx);
     if (this.ir.on) this.ir.setStage(true);
   }
 
@@ -159,7 +162,7 @@ export class World {
     this.stage.interior.forEach((l, i) => (l.intensity = (i === 4 ? 0.8 : 1.6) * lightFactor));
     if (this.stage.bathLight) this.stage.bathLight.intensity = 0.8 * lightFactor;
     // Daytime running lights while driving
-    setDRL(snap?.driving ? 1 : 0);
+    setDRL(snap?.driving && (values.slidingDoor ?? 0) < 0.05 && (values.awning ?? 0) < 0.05 ? 1 : 0);
     // Cooktop & cookware
     const ind = W.induction || 0;
     reg.cookZones.forEach((m, i) => (m.emissiveIntensity = ind > 0 ? (i === 0 ? ind / 900 : ind > 900 ? 1.2 : 0.2) : 0));
@@ -191,6 +194,12 @@ export class World {
     if (snap && this.modes.sim === 'thermal') {
       this.uaCache = envelopeUA({ covers: snap.covers, podOut: snap.podOut });
       this.viz.updateThermal(dt, snap, this.uaCache, this.sunDir);
+    }
+    this.surroundings.update(dt);
+    // Camp light under the awning after dark
+    if (reg.awningLight) {
+      const nightK = THREE.MathUtils.clamp((0.12 - this.sunDir.y) / 0.25, 0, 1);
+      reg.awningLight.intensity = (values.awning ?? 0) * lightFactor * nightK * 9;
     }
     this.ir.update(snap, this.sunDir);
     animatePrecip(this.stage, dt);

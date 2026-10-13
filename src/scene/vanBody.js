@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { boxMesh, boxC, B, roundedRectPath, cylBetween } from './geom.js';
 import { buildShell, sideW, halfW, topSurfaceY, XR, XF, YB } from './bodyShell.js';
+import { buildWheel } from './wheels.js';
 import { INTERIOR } from '../data/vehicle.js';
 
 const ZO = 1.01; // outer half-width at the beltline
@@ -247,38 +248,10 @@ export function buildBody(M) {
   }
 
   // ── Wheels ─────────────────────────────────────────────────
-  const prof = [[0.205, -0.11], [0.3, -0.122], [0.36, -0.12], [0.385, -0.1], [0.395, -0.05], [0.395, 0.05], [0.385, 0.1], [0.36, 0.12], [0.3, 0.122], [0.205, 0.11]];
-  const tireG = new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), 48);
-  const rimG = new THREE.CylinderGeometry(0.2, 0.2, 0.2, 32);
-  const capG = new THREE.CylinderGeometry(0.075, 0.075, 0.03, 20);
-  const spokeG = new THREE.BoxGeometry(0.03, 0.012, 0.16);
   for (const x of [0, 4.325]) {
     for (const s of [-1, 1]) {
-      const w = new THREE.Group();
+      const w = buildWheel(M, s);
       w.position.set(x, 0.395, s * 0.865);
-      const t = new THREE.Mesh(tireG, M.tire);
-      t.rotation.x = Math.PI / 2;
-      t.castShadow = true;
-      w.add(t);
-      const rim = new THREE.Mesh(rimG, M.trim);
-      rim.rotation.x = Math.PI / 2;
-      w.add(rim);
-      const face = new THREE.Mesh(new THREE.CylinderGeometry(0.195, 0.195, 0.01, 32), M.rim);
-      face.rotation.x = Math.PI / 2;
-      face.position.z = s * 0.1;
-      w.add(face);
-      for (let i = 0; i < 6; i++) {
-        const sp = new THREE.Mesh(spokeG, M.trim);
-        sp.position.z = s * 0.106;
-        sp.rotation.z = (i * Math.PI) / 3;
-        sp.position.x = Math.cos((i * Math.PI) / 3 + Math.PI / 2) * 0.11;
-        sp.position.y = Math.sin((i * Math.PI) / 3 + Math.PI / 2) * 0.11;
-        w.add(sp);
-      }
-      const c = new THREE.Mesh(capG, M.chrome);
-      c.rotation.x = Math.PI / 2;
-      c.position.z = s * 0.112;
-      w.add(c);
       w.traverse((m) => tag(m, 'van-body', 'wheel'));
       root.add(w);
       // arch liner
@@ -297,7 +270,8 @@ export function buildBody(M) {
   root.add(tag(cylBetween([0.1, 0.42, 0], [4.0, 0.45, 0], 0.035, M.alu), 'van-body', 'chassis')); // driveshaft
   root.add(tag(cylBetween([-1.1, 0.38, -0.3], [3.8, 0.4, -0.25], 0.03, M.aluDark), 'van-body', 'chassis')); // exhaust
   // spare wheel under the rear
-  const spare = new THREE.Mesh(tireG, M.tire);
+  const spare = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.09, 12, 40), M.tyre);
+  spare.rotation.x = Math.PI / 2;
   spare.position.set(-1.05, 0.42, 0);
   root.add(tag(spare, 'van-body', 'chassis'));
 

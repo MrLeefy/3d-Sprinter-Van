@@ -90,6 +90,49 @@ function makeSkyMaterial() {
   });
 }
 
+// Ground: flat around the camp, rolling gently further out (value noise, metres).
+function h2(x, z) {
+  const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+function vnoise2(x, z) {
+  const ix = Math.floor(x), iz = Math.floor(z), fx = x - ix, fz = z - iz;
+  const ux = fx * fx * (3 - 2 * fx), uz = fz * fz * (3 - 2 * fz);
+  const a = h2(ix, iz), b = h2(ix + 1, iz), c = h2(ix, iz + 1), d = h2(ix + 1, iz + 1);
+  return a + (b - a) * ux + (c - a) * uz + (a - b - c + d) * ux * uz;
+}
+export function groundHeight(x, z) {
+  const r = Math.hypot(x - 1.8, z);
+  const k = THREE.MathUtils.smoothstep(r, 9, 45);
+  if (k <= 0) return 0;
+  const n = vnoise2(x * 0.035, z * 0.035) * 0.65 + vnoise2(x * 0.09 + 7, z * 0.09 - 3) * 0.35;
+  return k * (n - 0.35) * 2.6;
+}
+function groundGeometry() {
+  const rings = [];
+  for (let r = 0; r < 160; r += r < 12 ? 1.5 : r < 50 ? 3 : 8) rings.push(r);
+  rings.push(160);
+  const segA = 128, pos = [], uv = [], idx = [];
+  for (let j = 0; j < rings.length; j++) {
+    for (let i = 0; i <= segA; i++) {
+      const a = (i / segA) * Math.PI * 2, r = rings[j];
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      pos.push(x, groundHeight(x, z), z);
+      uv.push(x / 320 + 0.5, -z / 320 + 0.5);
+      if (j < rings.length - 1 && i < segA) {
+        const p = j * (segA + 1) + i;
+        idx.push(p, p + 1, p + segA + 1, p + 1, p + segA + 2, p + segA + 1);
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
 export function createStage(container, { quality = autoQuality() } = {}) {
   const Q = QUALITY[quality] || QUALITY.high;
   const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: true });
@@ -177,8 +220,7 @@ export function createStage(container, { quality = autoQuality() } = {}) {
         diffuseColor *= sampledDiffuseColor;
       #endif`);
   };
-  const ground = new THREE.Mesh(new THREE.CircleGeometry(160, 96), groundMat);
-  ground.rotation.x = -Math.PI / 2;
+  const ground = new THREE.Mesh(groundGeometry(), groundMat);
   ground.receiveShadow = true;
   scene.add(ground);
   const grounds = {};
@@ -219,7 +261,7 @@ export function createStage(container, { quality = autoQuality() } = {}) {
   }
   const rainGeo = new THREE.BufferGeometry();
   rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
-  const rain = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({ color: 0xc4d6e6, transparent: true, opacity: 0.32, depthWrite: false }));
+  const rain = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({ color: 0x9fb2c4, transparent: true, opacity: 0.16, depthWrite: false }));
   rain.visible = false;
   rain.frustumCulled = false;
   scene.add(rain);

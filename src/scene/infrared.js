@@ -170,6 +170,7 @@ export class Infrared {
       if (st.bloomPass) st.bloomPass.enabled = !!st.Q.bloom;
     }
     this.world.flows.group.visible = !on;
+    this.world.surroundings.group.visible = !on;
   }
 
   /** Recompute every profile temperature from the snapshot. */

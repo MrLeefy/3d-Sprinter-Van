@@ -260,6 +260,11 @@ export function makeMaterials() {
   M.glassClear = new THREE.MeshPhysicalMaterial({ color: 0xbfd8e6, roughness: 0.05, transparent: true, opacity: 0.22 });
   M.tire = std({ color: 0x1a1a1a, roughness: 0.92, map: treadTexture() });
   M.rubber = std({ color: 0x111111, roughness: 0.9 });
+  M.tyre = std({ color: 0x1d1d1e, roughness: 0.86, map: noiseTexture('#2a2a2a', 22, 61, 256) });
+  M.tyreLetters = std({ color: 0x8c8c8c, roughness: 0.8, alphaTest: 0.5, polygonOffset: true, polygonOffsetFactor: -2 });
+  M.wheelBlack = new THREE.MeshPhysicalMaterial({ color: 0x17181b, metalness: 0.55, roughness: 0.34, clearcoat: 0.7, clearcoatRoughness: 0.18 });
+  M.brakeDisc = std({ color: 0x8d9095, metalness: 0.85, roughness: 0.42, map: noiseTexture('#9a9da1', 30, 63, 256) });
+  M.caliper = std({ color: 0x2b2d31, metalness: 0.4, roughness: 0.5 });
   M.rim = std({ color: 0xa9adb3, roughness: 0.3, metalness: 0.9 });
   M.headlight = new THREE.MeshPhysicalMaterial({ color: 0xe8eef5, roughness: 0.05, metalness: 0.3, clearcoat: 1, emissive: 0x222222 });
   M.tail = std({ color: 0x8a0f12, roughness: 0.25, emissive: 0x2a0000 });

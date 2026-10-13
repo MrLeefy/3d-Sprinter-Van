@@ -282,7 +282,7 @@ export class App {
     this.ctrl.climate = { ...this.ctrl.climate, ...scn.climate };
     delete this.ctrl.climate.covers;
     for (const b of this.root.querySelectorAll('[data-scn]')) b.setAttribute('aria-pressed', String(b.dataset.scn === id));
-    const hour = initial ? (scn.id === 'overnight' ? 21 : 13) : scn.id === 'overnight' ? 21 : scn.id === 'winter' ? 8.5 : this.hour();
+    const hour = initial ? (scn.id === 'overnight' ? 21 : scn.id === 'summer' ? 17.5 : 13) : scn.id === 'overnight' ? 21 : scn.id === 'winter' ? 8.5 : this.hour();
     this.resetSim(hour);
     this.setHour(hour);
     this.res.scn = id;

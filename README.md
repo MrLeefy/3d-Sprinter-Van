@@ -38,7 +38,7 @@ npm run build:single  # one-file page: dist-single/stealth-sprinter.html (three.
 | **Guided tour** (top bar) | Twelve scripted stops — stealth exterior, roof, service garage, live power, galley, wet bath, sealed ventilation, infrared, slide-out pod, full camp, daily living and honest limits. Play, pause or step. |
 | **Walk inside** | First-person at eye height: drag to look, W A S D / arrows / on-screen pad to walk. Collisions come from the component catalogue, so the walk respects the real aisle. Click anything to inspect it. |
 | **Infrared camera** | Every surface shaded by its estimated temperature (ironbow palette, auto-ranged scale): sol-air heating, night-sky cooling, U-value losses, stratified cabin air and live appliance heat. Hover for °C. |
-| **Photo mode & graphics** | Press **H** to hide the panels. Graphics: High (ambient occlusion, bloom, 4K shadows), Medium, Low or Lite; the choice is remembered. |
+| **Photo mode & graphics** | Press **H** to hide the panels. Graphics: High (ambient occlusion, bloom, 4K shadows), Medium, Low or Lite, switched live and remembered; an automatically chosen tier steps down if the frame rate drops. |
 
 ## Rendering
 
@@ -49,7 +49,12 @@ npm run build:single  # one-file page: dist-single/stealth-sprinter.html (three.
   short hood, rounded nose) with exact door apertures. Windows, rubber seals, panel gaps,
   headlights and road grime are drawn by a shader patch on the paint, and the glass is cut by
   the same signed-distance functions.
-- CC0 photographic PBR textures (wood, leather, fabric, tile, ground) on metric UVs; glowing
+- LT245/75R16 all-terrain tyres (instanced tread blocks, sidewall lettering) on 16" six-spoke
+  alloys with brake discs and calipers.
+- Each scenario dresses the site: rolling ground, distant hills or desert mesas, pine tree
+  lines (snow-laden in winter), wind-swayed grass, dry shrubs and rocks; a warm camp light
+  hangs under the awning after dark.
+- CC0 photographic PBR textures (wood, leather, fabric, ground) on metric UVs; glowing
   shader streams show water, current and airflow moving at their simulated rates.
 
 ## Design at a glance

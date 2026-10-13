@@ -192,7 +192,7 @@ float bodyGaps(vec3 p, vec3 n) {
       g = max(g, gapLine(sdRR(sp, vec2(3.635, 0.985), vec2(0.085, 0.065), 0.025))); // fuel flap
     }
   }
-  if (n.y > 0.3 && p.x > 4.45) g = max(g, gapLine(sdRR(vec2(p.x, az), vec2(4.97, 0.0), vec2(0.44, 0.8), 0.12))); // hood
+  if (n.y > 0.55 && p.x > 4.45) g = max(g, gapLine(sdRR(vec2(p.x, az), vec2(4.97, 0.0), vec2(0.44, 0.8), 0.12)) * smoothstep(0.55, 0.7, n.y)); // hood
   return g;
 }
 // Swept headlight cluster: x = lens area, y = DRL light guide, z = projector chrome rings, w = projector lenses
@@ -245,7 +245,7 @@ export function patchPaint(mat) {
         diffuseColor.rgb *= 1.0 - bGrime * vec3(0.9, 1.0, 1.15);
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.018), max(bSeal, bGap * 0.9));
         vec3 hlCol = vec3(0.035, 0.04, 0.045);
-        hlCol = mix(hlCol, vec3(0.75, 0.76, 0.78), hl.z);   // chrome bezels
+        hlCol = mix(hlCol, vec3(0.55, 0.56, 0.58), hl.z);   // chrome bezels
         hlCol = mix(hlCol, vec3(0.012, 0.014, 0.018), hl.w); // projector lenses
         hlCol = mix(hlCol, vec3(0.82, 0.83, 0.85), hl.y);    // frosted DRL light guide
         diffuseColor.rgb = mix(diffuseColor.rgb, hlCol, bHL);`)
@@ -257,7 +257,7 @@ export function patchPaint(mat) {
         metalnessFactor = mix(metalnessFactor, 0.9, bHL * (0.55 + 0.4 * hl.z) * (1.0 - hl.y));`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         float bDRL = hl.y;
-        totalEmissiveRadiance += vec3(1.0, 0.97, 0.92) * bDRL * uDRL * 8.0;`)
+        totalEmissiveRadiance += vec3(1.0, 0.97, 0.92) * bDRL * uDRL * 2.5;`)
       .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
         #ifdef USE_CLEARCOAT
           material.clearcoat *= (1.0 - max(bSeal, bGap)) * (1.0 - bGrime * 2.0);

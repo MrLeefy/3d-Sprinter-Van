@@ -226,6 +226,12 @@ export const cabRoofBuilders = {
       g.add(l);
       legs.push({ m: l, x });
     }
+    // warm camp light hung from the roller, aimed down and out over the living area
+    const spot = new THREE.SpotLight(0xffc27a, 0, 9, 1.05, 0.85, 1.6);
+    spot.position.set((b.x[0] + b.x[1]) / 2, 2.55, 1.15);
+    spot.target.position.set((b.x[0] + b.x[1]) / 2, 0, 2.9);
+    g.add(spot, spot.target);
+    reg.awningLight = spot;
     const z0 = 1.0, y0 = 2.66;
     rig.on('awning', (v) => {
       const ext = 2.5 * v;

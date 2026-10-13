@@ -19,10 +19,10 @@ function seat(side) {
     ring.position.set(CAB.seatPivotX, 0.995, z);
     g.add(ring);
     const s = pivotGroup(CAB.seatPivotX, 0, z);
-    addWorld(s, boxMesh(B(2.86, 3.36, 1.0, 1.17, z - 0.26, z + 0.26), M.fabricDark, 0.06));
+    addWorld(s, boxMesh(B(2.86, 3.36, 1.0, 1.17, z - 0.26, z + 0.26), M.leather, 0.06));
     const back = pivotGroup(2.9, 1.15, z);
-    addWorld(back, boxMesh(B(2.84, 2.96, 1.15, 1.9, z - 0.26, z + 0.26), M.fabricDark, 0.06));
-    addWorld(back, boxMesh(B(2.85, 2.95, 1.92, 2.12, z - 0.14, z + 0.14), M.fabricDark, 0.05));
+    addWorld(back, boxMesh(B(2.84, 2.96, 1.15, 1.9, z - 0.26, z + 0.26), M.leather, 0.06));
+    addWorld(back, boxMesh(B(2.85, 2.95, 1.92, 2.12, z - 0.14, z + 0.14), M.leather, 0.05));
     back.rotation.z = 0.18;
     back.position.set(2.9 - CAB.seatPivotX, 1.15, 0); // re-base into the swivel group
     s.add(back);

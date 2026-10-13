@@ -241,6 +241,23 @@ Scenarios (`src/data/scenarios.js`) supply daily temperature, humidity and irrad
 A two-person daily routine drives occupancy, cooking, showers, work and sleep. The same routine
 animates the occupant in Daily-living mode.
 
+### Infrared camera model (visual estimate)
+
+The Infrared view (`src/scene/infrared.js`) turns the live snapshot into steady-state surface
+temperatures. It is an estimate for explanation, not a measured image:
+
+- **Outside skin:** outdoor air + U·(T_in − T_out)/h_o (h_o = 20 W/m²K), plus sol-air heating
+  α·I/h_o on sun-facing surfaces (α = 0.3 for white paint) and night-sky cooling on
+  upward-facing surfaces (up to ≈ 4.5 K on a clear night). Glass uses U = 5.8 W/m²K (1.6 with
+  the insulated covers), the cab metal 2.0, insulated walls 1.1.
+- **Inside surfaces:** cabin air − U·(T_in − T_out)/h_i (h_i = 8 W/m²K), with vertical
+  stratification of 0.5–1.8 K/m depending on whether the heater or AC is running.
+- **Equipment:** boiler, heater outlet and exhaust cowl, induction zones and cookware,
+  microwave, fridge, batteries (current-dependent), inverter (load-dependent), MPPT and DC-DC
+  chargers, AC condenser and cold supply duct, water tanks and the heated grey tank.
+- Apparent temperature drifts toward the reflected sky temperature at grazing angles (lower
+  emissivity), as a real thermal camera shows on glass and gloss paint.
+
 ## 11. Acceptance tests
 
 `npm test` runs 85 node tests. Of the 76 engineering checks, 73 pass, 3 warn and 0 fail. They

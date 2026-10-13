@@ -6,7 +6,7 @@ const cache = new Map();
 
 // ── PBR texture sets ─────────────────────────────────────────────────────────
 // Files: textures/<id>_d.jpg (colour), _n.jpg (OpenGL normal), _r.jpg (roughness, optional).
-const HAS_ROUGH = new Set(['oak_veneer_01', 'oak_wood_planks', 'fabric_leather_02', 'marble_01', 'brown_mud_02']);
+const HAS_ROUGH = new Set(['oak_veneer_01', 'oak_wood_planks', 'fabric_leather_02', 'brown_mud_02']);
 const loader = new THREE.TextureLoader();
 const srcCache = new Map();
 export const TEXTURE_BASE = { url: 'textures/' };
@@ -291,7 +291,6 @@ export function makeMaterials() {
   M.ceramicGlaze = new THREE.MeshPhysicalMaterial({ color: 0x2f5d62, roughness: 0.25, clearcoat: 0.8, side: THREE.DoubleSide });
   M.soil = std({ color: 0x3a2c22, roughness: 1 });
   M.leaf = std({ color: 0x5e8a4e, roughness: 0.6 });
-  M.tile = pbr('marble_01', { repeat: 1.4, normalScale: 0.6 }, { color: 0xf2efe9, roughness: 1 });
   M.ceramic = new THREE.MeshPhysicalMaterial({ color: 0x0b0b0c, roughness: 0.08, metalness: 0.1, clearcoat: 1 });
   M.screen = std({ color: 0x0b1420, roughness: 0.2, emissive: 0x08304a, emissiveIntensity: 0.8 });
   M.white = std({ color: 0xf6f6f4, roughness: 0.5 });

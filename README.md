@@ -35,6 +35,22 @@ npm run build:single  # one-file page: dist-single/stealth-sprinter.html (three.
 | **Water** | Tank levels, run taps and showers, refill, dump, empty the toilet, simulate a leak (pump lock-out), winterise; freeze-protection status. |
 | **Resources** | Multi-day simulation with battery, temperature, water and air-quality charts, energy by use, and endurance until the first resource runs out. |
 | **Engineering** | Live acceptance tests plus weight & axle loads, capacities, heating/cooling demand, space use, cost estimate, items needing licensed sign-off and labelled assumptions. |
+| **Guided tour** (top bar) | Twelve scripted stops — stealth exterior, roof, service garage, live power, galley, wet bath, sealed ventilation, infrared, slide-out pod, full camp, daily living and honest limits. Play, pause or step. |
+| **Walk inside** | First-person at eye height: drag to look, W A S D / arrows / on-screen pad to walk. Collisions come from the component catalogue, so the walk respects the real aisle. Click anything to inspect it. |
+| **Infrared camera** | Every surface shaded by its estimated temperature (ironbow palette, auto-ranged scale): sol-air heating, night-sky cooling, U-value losses, stratified cabin air and live appliance heat. Hover for °C. |
+| **Photo mode & graphics** | Press **H** to hide the panels. Graphics: High (ambient occlusion, bloom, 4K shadows), Medium, Low or Lite; the choice is remembered. |
+
+## Rendering
+
+- Physical (Preetham) sky with procedural clouds, stars and moon; the image-based lighting is
+  regenerated from that sky as the weather and time of day change.
+- Post-processing: ground-truth ambient occlusion, bloom and MSAA/SMAA, with quality tiers.
+- The body is a single smooth loft through cross-sections (high-roof brow, raked windshield,
+  short hood, rounded nose) with exact door apertures. Windows, rubber seals, panel gaps,
+  headlights and road grime are drawn by a shader patch on the paint, and the glass is cut by
+  the same signed-distance functions.
+- CC0 photographic PBR textures (wood, leather, fabric, tile, ground) on metric UVs; glowing
+  shader streams show water, current and airflow moving at their simulated rates.
 
 ## Design at a glance
 
@@ -71,8 +87,9 @@ Latest acceptance results: [docs/ACCEPTANCE-REPORT.md](docs/ACCEPTANCE-REPORT.md
 ```
 src/data/      vehicle specs, component catalogue, wiring, plumbing, HVAC, mechanisms, scenarios
 src/sim/       thermal, coupled time-step model, weight, cost, space, acceptance suite
-src/scene/     three.js body, interior builders, routed services, flows, overlays, modes
-src/ui/        app controller, dashboards, charts
+src/scene/     three.js stage, lofted body, interior builders, services & streams, infrared,
+               walk-through, props, overlays, modes
+src/ui/        app controller, dashboards, charts, guided tour
 tests/         node --test acceptance tests
 scripts/       report generator, single-file build
 ```

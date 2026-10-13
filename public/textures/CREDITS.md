@@ -7,12 +7,11 @@ released under **CC0** (public domain). They were downloaded at 1K resolution an
 | File prefix | Poly Haven asset | Used for |
 |---|---|---|
 | `american_walnut_veneer` | American Walnut Veneer | cabinetry (honey-tinted) and dark accents |
-| `oak_veneer_01` | Oak Veneer 01 | figured oak accents |
+| `oak_veneer_01` | Oak Veneer 01 | figured oak table top |
 | `oak_wood_planks` | Oak Wood Planks | floor |
-| `fabric_leather_02` | Fabric Leather 02 | upholstery |
+| `fabric_leather_02` | Fabric Leather 02 | swivel-seat upholstery |
 | `caban` | Caban | felt wall lining, upholstery, blanket (converted to greyscale for tinting) |
 | `cotton_jersey` | Cotton Jersey | bedding (converted to greyscale for tinting) |
-| `marble_01` | Marble 01 | wet-bath tiles |
 | `aerial_sand` | Aerial Sand | summer ground |
 | `snow_02` | Snow 02 | winter ground (normal map only) |
 | `brown_mud_02` | Brown Mud 02 | rain ground |

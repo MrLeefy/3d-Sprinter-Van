@@ -232,7 +232,7 @@ export const galleyBuilders = {
     const P = new THREE.Vector2(2.1, -0.3);
     const yT = 1.42;
     const top = new THREE.Group();
-    top.add(boxMesh(B(-0.2, 0.2, 0, 0.028, -0.35, 0.35), M.walnut, 0.012));
+    top.add(boxMesh(B(-0.2, 0.2, 0, 0.028, -0.35, 0.35), M.oakFigured, 0.012));
     g.add(top);
     const l1 = new THREE.Mesh(rbox(0.25, 0.03, 0.04, 0.01), M.aluDark);
     const l2 = new THREE.Mesh(rbox(0.25, 0.03, 0.04, 0.01), M.aluDark);

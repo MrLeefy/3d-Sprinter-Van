@@ -77,4 +77,5 @@ tests/         node --test acceptance tests
 scripts/       report generator, single-file build
 ```
 
-All geometry is procedural: there are no external models, textures or images.
+All geometry is procedural (no external models). Wood, fabric, leather, tile and ground surfaces
+use CC0 photographic PBR textures from Poly Haven — see [public/textures/CREDITS.md](public/textures/CREDITS.md).

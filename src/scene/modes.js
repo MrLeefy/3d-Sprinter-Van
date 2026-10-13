@@ -1,6 +1,7 @@
 // View-mode & focus styling, exploded view, cutaway clipping, selection and picking.
 import * as THREE from 'three';
 import { byId } from '../data/components.js';
+import { copyPatch } from './bodyShell.js';
 
 export const SIM_FOCUS = {
   none: null,
@@ -56,7 +57,7 @@ export class Modes {
 
   cutMat(orig) {
     if (!this.cutMats.has(orig)) {
-      const m = orig.clone();
+      const m = copyPatch(orig, orig.clone());
       m.clippingPlanes = this.planes;
       m.clipIntersection = false;
       m.side = THREE.DoubleSide;
@@ -106,6 +107,7 @@ export class Modes {
         return;
       }
       if (kind === 'glass') {
+        if (m.userData.bodyGlass && xray) m.visible = false;
         m.material = cut ? this.cutMat(orig) : xray ? M.glassClear : orig;
         return;
       }
@@ -216,6 +218,7 @@ export class Modes {
 function bodyExplode(c, obj) {
   const v = new THREE.Vector3();
   const k = obj.userData?.kind;
+  if (obj.userData?.explodeDir) return v.fromArray(obj.userData.explodeDir);
   if (c.y > 2.62) v.set(0, 1.5, 0);
   else if (c.z > 0.62) v.set(0, 0, 1.35);
   else if (c.z < -0.62) v.set(0, 0, -1.35);

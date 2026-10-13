@@ -1,58 +1,47 @@
-// Procedural Sprinter 170" high-roof body: shell panels, glazing, doors, wheels,
-// lights, bumpers, roof rack, interior linings and insulation layers.
+// Procedural Sprinter 170" high-roof body: lofted shell (bodyShell.js), glazing, doors,
+// wheels, lights, bumpers, roof rack, interior linings and insulation layers.
 import * as THREE from 'three';
-import { boxMesh, boxC, B, extrude, roundedRectPath, cylBetween, pivotGroup, addWorld } from './geom.js';
+import { boxMesh, boxC, B, roundedRectPath, cylBetween } from './geom.js';
+import { buildShell, sideW, halfW, topSurfaceY, XR, XF, YB } from './bodyShell.js';
 import { INTERIOR } from '../data/vehicle.js';
 
-const ZO = 1.01; // outer half-width
-const WALL_T = 0.022;
+const ZO = 1.01; // outer half-width at the beltline
 
-function sideShape() {
+/** Black plastic wheel-arch flare (annulus above the sill), on one side. */
+function archFlare(ax, side, M) {
+  const cy = 0.395, r0 = 0.468, r1 = 0.535;
+  const a = Math.asin((YB - 0.005 - cy) / r1), b = Math.asin((YB - 0.005 - cy) / r0);
   const s = new THREE.Shape();
-  const yb = 0.55;
-  s.moveTo(-1.62, yb);
-  const arch = (cx) => {
-    const r = 0.47, cy = 0.395;
-    const a0 = Math.atan2(yb - cy, -Math.sqrt(r * r - (yb - cy) ** 2));
-    const a1 = Math.atan2(yb - cy, Math.sqrt(r * r - (yb - cy) ** 2));
-    s.lineTo(cx + r * Math.cos(a0), yb);
-    s.absarc(cx, cy, r, a0, a1, true);
-  };
-  arch(0);
-  arch(4.325);
-  s.lineTo(5.2, yb);
-  s.lineTo(5.24, 0.96);
-  s.quadraticCurveTo(5.05, 1.08, 4.47, 1.24);
-  s.lineTo(3.88, 2.28);
-  s.quadraticCurveTo(3.7, 2.48, 3.4, 2.5);
-  s.lineTo(-1.62, 2.5);
-  s.lineTo(-1.62, yb);
-  return s;
+  s.absarc(ax, cy, r1, a, Math.PI - a, false);
+  s.absarc(ax, cy, r0, Math.PI - b, b, true);
+  s.closePath();
+  const g = new THREE.ExtrudeGeometry(s, { depth: 0.03, bevelEnabled: true, bevelThickness: 0.008, bevelSize: 0.008, bevelSegments: 2, curveSegments: 36 });
+  const m = new THREE.Mesh(g, M.trim);
+  m.position.z = side * (sideW(ax, 0.75) - 0.016);
+  if (side < 0) m.scale.z = -1;
+  m.castShadow = true;
+  return m;
 }
 
-function cabWindowPath() {
-  const p = new THREE.Path();
-  p.moveTo(2.98, 1.42);
-  p.lineTo(4.28, 1.42);
-  p.lineTo(3.86, 2.16);
-  p.lineTo(3.02, 2.16);
-  p.lineTo(2.98, 1.42);
-  return p;
-}
-
-function roofSection(outer = true) {
-  // Cross-section in (X = -z, Y = y) for extrusion along world +x
+/** Front bumper: rounded in plan to follow the nose. */
+function frontBumper(M) {
   const s = new THREE.Shape();
-  s.moveTo(-ZO, 2.49);
-  s.quadraticCurveTo(-ZO, 2.71, -0.78, 2.712);
-  s.quadraticCurveTo(0, 2.745, 0.78, 2.712);
-  s.quadraticCurveTo(ZO, 2.71, ZO, 2.49);
-  s.lineTo(ZO - 0.03, 2.49);
-  s.quadraticCurveTo(ZO - 0.03, 2.685, 0.77, 2.685);
-  s.quadraticCurveTo(0, 2.715, -0.77, 2.685);
-  s.quadraticCurveTo(-ZO + 0.03, 2.685, -ZO + 0.03, 2.49);
-  s.lineTo(-ZO, 2.49);
-  return s;
+  const pts = [];
+  for (let k = 0; k <= 24; k++) {
+    const x = 4.8 + (XF + 0.1 - 4.8) * (k / 24);
+    pts.push([x, Math.min(halfW(Math.min(x, XF)) + 0.03, 1.0)]);
+  }
+  s.moveTo(4.8, -pts[0][1]);
+  for (const [x, z] of pts) s.lineTo(x, -z);
+  s.quadraticCurveTo(XF + 0.13, 0, XF + 0.1, pts[24][1]);
+  for (const [x, z] of [...pts].reverse()) s.lineTo(x, z);
+  s.closePath();
+  const g = new THREE.ExtrudeGeometry(s, { depth: 0.26, bevelEnabled: true, bevelThickness: 0.035, bevelSize: 0.03, bevelSegments: 4, curveSegments: 16 });
+  g.rotateX(Math.PI / 2); // shape (x, z) → world x/z, extrusion downward
+  const m = new THREE.Mesh(g, M.trim);
+  m.position.y = 0.66;
+  m.castShadow = m.receiveShadow = true;
+  return m;
 }
 
 export function buildBody(M) {
@@ -69,124 +58,83 @@ export function buildBody(M) {
     return m;
   };
 
-  // ── Side walls ─────────────────────────────────────────────
+  // ── Lofted shell ───────────────────────────────────────────
+  const S = buildShell(M);
+  for (const m of [...Object.values(S.panels), S.rearCap, S.frontCap]) {
+    root.add(tag(m));
+    shell.push(m);
+  }
+  for (const k of ['windshield', 'cabL', 'cabR']) {
+    root.add(tag(S.glass[k], 'window-covers', 'glass'));
+    glass.push(S.glass[k]);
+  }
+  parts.podSkin = S.pod; // re-parented by the slide-out pod builder
+
   for (const side of [-1, 1]) {
-    const shape = sideShape();
-    shape.holes.push(cabWindowPath());
-    if (side > 0) shape.holes.push(roundedRectPath(INTERIOR.slidingDoor.x0, 0.6, INTERIOR.slidingDoor.x1, INTERIOR.slidingDoor.yTop, 0.06));
-    else shape.holes.push(roundedRectPath(-1.45, 1.5, -0.25, 2.15, 0.035));
-    const wall = extrude(shape, WALL_T, M.paint, 0.006);
-    wall.position.z = side > 0 ? ZO - WALL_T - 0.006 : -ZO + 0.006;
-    root.add(tag(wall));
-    shell.push(wall);
-    // character line & black rub strip
-    const crease = boxMesh(B(-1.6, 3.9, 1.3, 1.318, side * ZO - 0.004, side * ZO + 0.006), M.paint, 0.003);
-    crease.position.z = side * (ZO + 0.001);
-    root.add(tag(crease));
-    shell.push(crease);
-    for (const [x0, x1] of [[-1.58, -0.5], [0.5, side > 0 ? 1.38 : 3.82]]) {
-      const rub = boxMesh(B(x0, x1, 0.6, 0.72, -0.012, 0.012), M.trim, 0.006);
-      rub.position.z = side * (ZO + 0.006);
+    // wheel-arch flares
+    for (const ax of [0, 4.325]) root.add(tag(archFlare(ax, side, M)));
+    // black rub strips
+    for (const [x0, x1] of [[-1.56, -0.56], [0.56, side > 0 ? 1.4 : 3.8]]) {
+      const z = sideW((x0 + x1) / 2, 0.66);
+      const rub = boxMesh(B(x0, x1, 0.6, 0.72, z - 0.006, z + 0.014), M.trim, 0.006);
+      if (side < 0) rub.position.z *= -1;
       root.add(tag(rub));
     }
-    // cab window glass
-    const cg = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape(cabWindowPath().getPoints())), M.glass);
-    cg.position.z = side * (ZO - 0.012);
-    root.add(tag(cg, 'window-covers', 'glass'));
-    glass.push(cg);
-    // door seams
-    for (const [x, y0, y1] of [[2.82, 0.6, 2.42], [4.36, 0.62, 1.32]]) {
-      const seam = boxMesh(B(x - 0.003, x + 0.003, y0, y1, -0.004, 0.004), M.trim, 0.001);
-      seam.position.z = side * (ZO + 0.002);
-      root.add(tag(seam));
+    // cab door handle
+    {
+      const z = sideW(3.0, 1.33);
+      const h = boxMesh(B(2.95, 3.12, 1.31, 1.35, z - 0.008, z + 0.018), M.trim, 0.008);
+      if (side < 0) h.position.z *= -1;
+      root.add(tag(h));
     }
-    // door handle (cab)
-    const h = boxMesh(B(2.95, 3.12, 1.3, 1.34, -0.015, 0.015), M.trim, 0.008);
-    h.position.z = side * (ZO + 0.01);
-    root.add(tag(h));
     // side marker
-    const mk = boxMesh(B(1.0, 1.06, 0.78, 0.81, -0.006, 0.006), M.amber, 0.004);
-    mk.position.z = side * (ZO + 0.004);
-    root.add(tag(mk));
+    {
+      const z = sideW(1.03, 0.795);
+      const mk = boxMesh(B(1.0, 1.06, 0.78, 0.81, z - 0.004, z + 0.006), M.amber, 0.004);
+      if (side < 0) mk.position.z *= -1;
+      root.add(tag(mk));
+    }
     // mirrors
-    const arm = cylBetween([4.2, 1.42, side * 0.99], [4.12, 1.52, side * 1.16], 0.018, M.trim);
-    root.add(tag(arm));
-    const mir = boxC(4.1, 1.62, side * 1.19, 0.1, 0.36, 0.2, M.trim, 0.03);
+    const zm = sideW(4.2, 1.45);
+    root.add(tag(cylBetween([4.22, 1.44, side * (zm - 0.01)], [4.14, 1.54, side * (zm + 0.17)], 0.018, M.trim)));
+    const mir = boxC(4.1, 1.64, side * (zm + 0.2), 0.1, 0.36, 0.2, M.trim, 0.035);
     root.add(tag(mir));
-    const mirGlass = boxC(4.045, 1.62, side * 1.19, 0.01, 0.3, 0.16, M.chrome, 0.004);
+    const mirGlass = boxC(4.045, 1.64, side * (zm + 0.2), 0.01, 0.3, 0.16, M.chrome, 0.004);
     root.add(tag(mirGlass));
+    // rear tail-light clusters on the D-pillars
+    const tl = boxMesh(B(XR - 0.035, XR - 0.012, 0.78, 1.62, side > 0 ? 0.856 : -0.936, side > 0 ? 0.936 : -0.856), M.tail, 0.012);
+    root.add(tag(tl));
+    parts['tail' + side] = tl;
   }
-  // fuel flap (driver, front)
-  const flap = boxMesh(B(3.55, 3.72, 0.92, 1.05, -ZO - 0.004, -ZO + 0.004), M.paint, 0.01);
-  root.add(tag(flap));
-
-  // ── Roof (high roof) ───────────────────────────────────────
-  const roofG = new THREE.ExtrudeGeometry(roofSection(), { depth: 3.4 + 1.62, bevelEnabled: false, curveSegments: 24 });
-  const roof = new THREE.Mesh(roofG, M.paint);
-  roof.rotation.y = Math.PI / 2;
-  roof.position.x = -1.62;
-  roof.castShadow = roof.receiveShadow = true;
-  root.add(tag(roof));
-  shell.push(roof);
-  // Roof front cap sloping to the windshield header
-  const cap = new THREE.Shape();
-  cap.moveTo(3.48, 2.4);
-  cap.lineTo(3.48, 2.6);
-  cap.quadraticCurveTo(3.7, 2.6, 3.78, 2.4);
-  cap.lineTo(3.48, 2.4);
-  const capM = new THREE.Mesh(new THREE.ExtrudeGeometry(cap, { depth: 2.02 - 0.24, bevelEnabled: true, bevelThickness: 0.12, bevelSize: 0.12, bevelSegments: 5, curveSegments: 16 }), M.paint);
-  capM.position.z = -(2.02 - 0.24) / 2;
-  capM.castShadow = true;
-  root.add(tag(capM));
-  shell.push(capM);
-  // roof ribs (subtle)
-  for (let x = -1.3; x < 3.3; x += 0.42) {
-    const rib = boxMesh(B(x, x + 0.05, 2.72, 2.738, -0.6, 0.6), M.paint, 0.01);
-    root.add(tag(rib));
+  // sliding-door track cover (passenger rear quarter)
+  {
+    const z = sideW(0.8, 1.515);
+    root.add(tag(boxMesh(B(0.12, 1.42, 1.5, 1.53, z - 0.004, z + 0.012), M.trim, 0.004)));
   }
 
-  // ── Nose: hood, fascia, grille, lights, bumper ─────────────
-  const nose = new THREE.Shape();
-  nose.moveTo(4.42, 0.62);
-  nose.lineTo(5.18, 0.62);
-  nose.lineTo(5.2, 0.96);
-  nose.quadraticCurveTo(5.0, 1.05, 4.5, 1.18);
-  nose.lineTo(4.42, 0.62);
-  const noseM = new THREE.Mesh(new THREE.ExtrudeGeometry(nose, { depth: 1.98 - 0.14, bevelEnabled: true, bevelThickness: 0.07, bevelSize: 0.06, bevelSegments: 4 }), M.paint);
-  noseM.position.z = -(1.98 - 0.14) / 2;
-  noseM.castShadow = true;
-  root.add(tag(noseM));
-  shell.push(noseM);
-  const grille = boxMesh(B(5.22, 5.27, 0.7, 0.98, -0.52, 0.52), M.trimGloss, 0.03);
+  // ── Nose: grille, bumper, wipers ───────────────────────────
+  const grille = boxMesh(B(XF - 0.02, XF + 0.035, 0.66, 0.97, -0.5, 0.5), M.trimGloss, 0.035);
   root.add(tag(grille));
-  for (const y of [0.76, 0.84, 0.92]) root.add(tag(boxMesh(B(5.255, 5.28, y, y + 0.018, -0.5, 0.5), M.chrome, 0.006)));
-  for (const s of [-1, 1]) {
-    const hl = boxMesh(B(5.08, 5.26, 0.9, 1.03, s > 0 ? 0.56 : -0.96, s > 0 ? 0.96 : -0.56), M.headlight, 0.03);
-    hl.rotation.z = -0.12;
-    root.add(tag(hl));
-    const drl = boxMesh(B(5.2, 5.265, 0.905, 0.92, s > 0 ? 0.6 : -0.92, s > 0 ? 0.92 : -0.6), M.lightOn, 0.004);
-    root.add(tag(drl));
-    parts['drl' + s] = drl;
+  for (const y of [0.73, 0.81, 0.89]) root.add(tag(boxMesh(B(XF + 0.02, XF + 0.045, y, y + 0.02, -0.47, 0.47), M.chrome, 0.008)));
+  const star = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.009, 10, 36), M.chrome);
+  star.position.set(XF + 0.048, 0.84, 0);
+  star.rotation.y = Math.PI / 2;
+  root.add(tag(star));
+  for (let k = 0; k < 3; k++) {
+    const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.075, 0.012), M.chrome);
+    const a = (k * 2 * Math.PI) / 3;
+    spoke.position.set(XF + 0.05, 0.84 + Math.cos(a) * 0.037, Math.sin(a) * 0.037);
+    spoke.rotation.x = -a;
+    root.add(tag(spoke));
   }
-  const bumper = boxMesh(B(5.12, 5.34, 0.4, 0.69, -1.0, 1.0), M.trim, 0.06);
-  root.add(tag(bumper));
-  root.add(tag(boxMesh(B(5.3, 5.345, 0.44, 0.58, -0.45, 0.45), M.trimGloss, 0.02)));
-  // windshield
-  const ws = new THREE.BufferGeometry();
-  const wv = [4.47, 1.25, -0.93, 4.47, 1.25, 0.93, 3.89, 2.27, 0.9, 3.89, 2.27, -0.9];
-  ws.setAttribute('position', new THREE.Float32BufferAttribute(wv, 3));
-  ws.setIndex([0, 1, 2, 0, 2, 3]);
-  ws.computeVertexNormals();
-  const wsm = new THREE.Mesh(ws, M.glass);
-  wsm.material = M.glass;
-  root.add(tag(wsm, 'window-covers', 'glass'));
-  glass.push(wsm);
-  for (const s of [-1, 1]) root.add(tag(cylBetween([4.46, 1.27, s * 0.05], [4.3, 1.5, s * 0.75], 0.008, M.trim)));
-  // A-pillars
-  for (const s of [-1, 1]) root.add(tag(cylBetween([4.48, 1.24, s * 0.96], [3.88, 2.29, s * 0.94], 0.045, M.paint)));
+  root.add(tag(frontBumper(M)));
+  root.add(tag(boxMesh(B(XF + 0.06, XF + 0.135, 0.44, 0.56, -0.42, 0.42), M.trimGloss, 0.02))); // lower intake
+  for (const s of [-1, 1]) {
+    const z0 = s * 0.05, z1 = s * 0.74;
+    root.add(tag(cylBetween([4.45, topSurfaceY(4.45, z0) + 0.012, z0], [4.3, topSurfaceY(4.3, z1) + 0.012, z1], 0.007, M.trim)));
+  }
   // dashboard (visible through glass)
-  const dash = boxMesh(B(3.9, 4.45, 1.0, 1.32, -0.95, 0.95), M.trim, 0.06);
-  root.add(tag(dash));
+  root.add(tag(boxMesh(B(3.86, 4.36, 1.0, 1.29, -0.94, 0.94), M.trim, 0.06)));
   const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.02, 10, 32), M.trim);
   wheel.position.set(3.72, 1.42, -0.43);
   wheel.rotation.y = Math.PI / 2;
@@ -194,36 +142,30 @@ export function buildBody(M) {
   root.add(tag(wheel));
   root.add(tag(boxMesh(B(3.15, 3.9, 0.7, 0.98, -0.12, 0.12), M.trim, 0.04))); // centre console
 
-  // ── Rear: pillars, lights, bumper, doors ────────────────────
-  for (const s of [-1, 1]) {
-    const p = boxMesh(B(-1.645, -1.6, 0.55, 2.52, s > 0 ? 0.84 : -ZO, s > 0 ? ZO : -0.84), M.paint, 0.02);
-    root.add(tag(p));
-    shell.push(p);
-    const tl = boxMesh(B(-1.655, -1.635, 0.78, 1.62, s > 0 ? 0.88 : -0.995, s > 0 ? 0.995 : -0.88), M.tail, 0.015);
-    root.add(tag(tl));
-    parts['tail' + s] = tl;
-  }
-  const header = boxMesh(B(-1.645, -1.6, 2.5, 2.6, -ZO, ZO), M.paint, 0.02);
-  root.add(tag(header));
-  shell.push(header);
-  root.add(tag(boxMesh(B(-1.7, -1.56, 0.38, 0.62, -1.0, 1.0), M.trim, 0.04)));
-  root.add(tag(boxMesh(B(-1.72, -1.68, 0.55, 0.6, -0.35, 0.35), M.alu, 0.01))); // step plate
+  // ── Rear: bumper, step, doors ──────────────────────────────
+  root.add(tag(boxMesh(B(-1.73, -1.56, 0.38, 0.62, -0.99, 0.99), M.trim, 0.05)));
+  root.add(tag(boxMesh(B(-1.745, -1.7, 0.55, 0.6, -0.35, 0.35), M.alu, 0.01))); // step plate
 
   const doorShape = () => {
     const s = new THREE.Shape();
-    s.moveTo(0.19, 0.62);
-    s.lineTo(1.03, 0.62);
-    s.lineTo(1.03, 2.52);
-    s.lineTo(0.19, 2.52);
-    s.lineTo(0.19, 0.62);
-    s.holes.push(roundedRectPath(0.3, 1.8, 0.95, 2.34, 0.04));
+    const r = 0.03;
+    s.moveTo(0.19, 0.62 + r);
+    s.quadraticCurveTo(0.19, 0.62, 0.19 + r, 0.62);
+    s.lineTo(1.03 - r, 0.62);
+    s.quadraticCurveTo(1.03, 0.62, 1.03, 0.62 + r);
+    s.lineTo(1.03, 2.52 - r);
+    s.quadraticCurveTo(1.03, 2.52, 1.03 - r, 2.52);
+    s.lineTo(0.19 + r, 2.52);
+    s.quadraticCurveTo(0.19, 2.52, 0.19, 2.52 - r);
+    s.lineTo(0.19, 0.62 + r);
+    s.holes.push(roundedRectPath(0.3, 1.8, 0.95, 2.34, 0.05));
     return s;
   };
   for (const s of [-1, 1]) {
     // pivot outboard of the corner (offset 270° hinge)
     const g = new THREE.Group();
     g.position.set(-1.62, 0, s * 1.03);
-    const panel = new THREE.Mesh(new THREE.ExtrudeGeometry(doorShape(), { depth: 0.035, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.004, bevelSegments: 1 }), M.paint);
+    const panel = new THREE.Mesh(new THREE.ExtrudeGeometry(doorShape(), { depth: 0.035, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 2, curveSegments: 6 }), M.paint);
     panel.castShadow = true;
     // shape X → lateral offset from pivot (towards centreline); extrude → rearward
     if (s < 0) {
@@ -235,12 +177,17 @@ export function buildBody(M) {
     tag(panel, 'rear-doors');
     g.add(panel);
     shell.push(panel);
-    const gl = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape(roundedRectPath(0.3, 1.8, 0.95, 2.34, 0.04).getPoints())), M.glass);
+    const gl = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape(roundedRectPath(0.3, 1.8, 0.95, 2.34, 0.05).getPoints())), M.glass);
     gl.rotation.y = panel.rotation.y;
     gl.position.x = s < 0 ? -0.018 : -0.017;
     tag(gl, 'window-covers', 'glass');
     g.add(gl);
     glass.push(gl);
+    // window seal
+    const seal = new THREE.Mesh(new THREE.ExtrudeGeometry(Object.assign(new THREE.Shape(roundedRectPath(0.285, 1.785, 0.965, 2.355, 0.06).getPoints()), { holes: [roundedRectPath(0.3, 1.8, 0.95, 2.34, 0.05)] }), { depth: 0.008, bevelEnabled: false }), M.rubber);
+    seal.rotation.y = panel.rotation.y;
+    seal.position.x = s < 0 ? -0.036 : -0.044;
+    g.add(tag(seal, 'rear-doors'));
     // inner door card (lining)
     const card = new THREE.Mesh(new THREE.BoxGeometry(0.012, 1.0, 0.7), M.felt);
     card.position.set(0.012, 1.25, -s * 0.6);
@@ -279,35 +226,24 @@ export function buildBody(M) {
     }
   }
 
-  // ── Sliding door ───────────────────────────────────────────
+  // ── Sliding door (lofted skin cut from the shell) ──────────
   {
     const sd = INTERIOR.slidingDoor;
     const g = new THREE.Group();
-    const s = new THREE.Shape();
-    s.moveTo(sd.x0 + 0.01, 0.61);
-    s.lineTo(sd.x1 - 0.01, 0.61);
-    s.lineTo(sd.x1 - 0.01, sd.yTop - 0.01);
-    s.lineTo(sd.x0 + 0.01, sd.yTop - 0.01);
-    s.lineTo(sd.x0 + 0.01, 0.61);
-    const win = roundedRectPath(sd.x0 + 0.12, 1.55, sd.x1 - 0.32, 2.22, 0.05);
-    s.holes.push(win);
-    const panel = extrude(s, 0.02, M.paint, 0.005);
-    panel.position.z = ZO - 0.022;
-    g.add(tag(panel, 'sliding-door'));
-    shell.push(panel);
-    const gl = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape(win.getPoints())), M.glass);
-    gl.position.z = ZO - 0.01;
-    g.add(tag(gl, 'window-covers', 'glass'));
-    glass.push(gl);
-    const handle = boxMesh(B(sd.x1 - 0.2, sd.x1 - 0.05, 1.3, 1.34, ZO, ZO + 0.03), M.trim, 0.008);
+    g.add(tag(S.door, 'sliding-door'));
+    shell.push(S.door);
+    g.add(tag(S.glass.door, 'window-covers', 'glass'));
+    glass.push(S.glass.door);
+    const zh = sideW(sd.x1 - 0.12, 1.32);
+    const handle = boxMesh(B(sd.x1 - 0.2, sd.x1 - 0.05, 1.3, 1.34, zh - 0.004, zh + 0.022), M.trim, 0.008);
     g.add(tag(handle, 'sliding-door'));
-    const card = boxMesh(B(sd.x0 + 0.05, sd.x1 - 0.05, 0.7, 1.5, ZO - 0.04, ZO - 0.025), M.felt, 0.004);
+    const zr = sideW(2.0, 0.66);
+    g.add(tag(boxMesh(B(sd.x0 + 0.03, sd.x1 - 0.03, 0.6, 0.72, zr - 0.006, zr + 0.014), M.trim, 0.006), 'sliding-door'));
+    const card = boxMesh(B(sd.x0 + 0.05, sd.x1 - 0.05, 0.7, 1.5, ZO - 0.05, ZO - 0.035), M.felt, 0.004);
     g.add(tag(card, 'sliding-door', 'lining'));
     linings.push(card);
     root.add(g);
     parts.slidingDoor = g;
-    // track
-    root.add(tag(boxMesh(B(0.1, 1.42, 1.5, 1.53, ZO, ZO + 0.012), M.trim, 0.004)));
   }
 
   // ── Wheels ─────────────────────────────────────────────────
@@ -396,7 +332,7 @@ export function buildBody(M) {
     root.add(tag(up, 'insulation', 'lining'));
     linings.push(up);
     // insulation fill between skin and lining
-    const ins = boxMesh(B(-1.55, 2.75, 0.72, 2.48, s > 0 ? I.wallZ + 0.015 : -ZO + 0.03, s > 0 ? ZO - 0.03 : -I.wallZ - 0.015), M.insulation, 0.01, { cast: false });
+    const ins = boxMesh(B(-1.55, 2.75, 0.72, 2.48, s > 0 ? I.wallZ + 0.015 : -0.95, s > 0 ? 0.95 : -I.wallZ - 0.015), M.insulation, 0.01, { cast: false });
     ins.visible = false;
     root.add(tag(ins, 'insulation', 'insulation'));
     insulation.push(ins);
@@ -423,7 +359,7 @@ export function buildBody(M) {
   const rack = new THREE.Group();
   for (const s of [-1, 1]) {
     rack.add(boxMesh(B(-1.47, 2.66, 2.86, 2.9, s * 0.72 - 0.02, s * 0.72 + 0.02), M.alu, 0.01));
-    for (let x = -1.4; x <= 2.6; x += 0.62) rack.add(cylBetween([x, 2.735, s * 0.72], [x, 2.87, s * 0.72], 0.012, M.alu));
+    for (let x = -1.4; x <= 2.6; x += 0.62) rack.add(cylBetween([x, 2.715, s * 0.72], [x, 2.87, s * 0.72], 0.012, M.alu));
   }
   for (const x of [-1.46, -0.5, 0.02, 0.56, 1.1, 1.6, 2.12, 2.6]) rack.add(boxMesh(B(x, x + 0.035, 2.885, 2.92, -0.74, 0.74), M.alu, 0.006));
   const fair = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.2, 1.6), M.alu);

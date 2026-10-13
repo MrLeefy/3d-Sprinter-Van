@@ -1,7 +1,101 @@
-// Material library with procedural (canvas) textures — no external assets.
+// Material library: CC0 photographic PBR sets (Poly Haven, public/textures) for wood, leather,
+// fabric and ground, plus procedural canvas textures for everything else.
 import * as THREE from 'three';
 
 const cache = new Map();
+
+// ── PBR texture sets ─────────────────────────────────────────────────────────
+// Files: textures/<id>_d.jpg (colour), _n.jpg (OpenGL normal), _r.jpg (roughness, optional).
+const HAS_ROUGH = new Set(['oak_veneer_01', 'oak_wood_planks', 'fabric_leather_02', 'marble_01', 'brown_mud_02']);
+const loader = new THREE.TextureLoader();
+const srcCache = new Map();
+export const TEXTURE_BASE = { url: 'textures/' };
+
+function srcTex(file, srgb) {
+  if (!srcCache.has(file)) {
+    const entry = { tex: null, loaded: false, users: [] };
+    entry.tex = loader.load(TEXTURE_BASE.url + file, () => {
+      entry.loaded = true;
+      for (const u of entry.users) u.needsUpdate = true;
+    });
+    entry.tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    srcCache.set(file, entry);
+  }
+  return srcCache.get(file);
+}
+
+/**
+ * Load a PBR set. `repeat` is texture repeats per UV unit (with metric UVs: per metre);
+ * `rotate` turns the texture (radians) so wood grain can run along the long axis.
+ */
+export function loadPBR(id, { repeat = 1, normalScale = 1, rotate = 0 } = {}) {
+  const rep = Array.isArray(repeat) ? repeat : [repeat, repeat];
+  const mk = (suffix, srgb) => {
+    const e = srcTex(`${id}_${suffix}.jpg`, srgb);
+    const t = new THREE.Texture(); // shares the image source; clone() would flag an update before load
+    t.source = e.tex.source;
+    t.colorSpace = e.tex.colorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    t.repeat.set(rep[0], rep[1]);
+    t.rotation = rotate;
+    if (e.loaded) t.needsUpdate = true;
+    else e.users.push(t);
+    return t;
+  };
+  return {
+    map: mk('d', true),
+    normalMap: mk('n', false),
+    roughnessMap: HAS_ROUGH.has(id) ? mk('r', false) : null,
+    normalScale: new THREE.Vector2(normalScale, normalScale),
+  };
+}
+
+/** Standard material dressed with a PBR set; flagged so meshes get metric (box-projected) UVs. */
+function pbr(id, opts = {}, params = {}) {
+  const t = loadPBR(id, opts);
+  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, map: t.map, normalMap: t.normalMap, normalScale: t.normalScale, ...params });
+  if (t.roughnessMap) m.roughnessMap = t.roughnessMap;
+  m.userData.metric = true;
+  return m;
+}
+
+/**
+ * Give every mesh that uses a metric material box-projected UVs in metres (object space,
+ * including the mesh scale), so textures keep their real-world size on any part.
+ */
+export function applyMetricUVs(root) {
+  const done = new Map();
+  const n = new THREE.Vector3();
+  root.traverse((o) => {
+    if (!o.isMesh || o.isInstancedMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    if (!mats.some((m) => m?.userData?.metric)) return;
+    const s = o.scale;
+    const key = `${o.geometry.uuid}|${s.x.toFixed(3)}|${s.y.toFixed(3)}|${s.z.toFixed(3)}`;
+    if (!done.has(key)) {
+      const g = o.geometry.clone();
+      const pos = g.attributes.position;
+      if (!g.attributes.normal) g.computeVertexNormals();
+      const nor = g.attributes.normal;
+      const uv = new Float32Array(pos.count * 2);
+      for (let i = 0; i < pos.count; i++) {
+        n.fromBufferAttribute(nor, i);
+        const x = pos.getX(i) * s.x, y = pos.getY(i) * s.y, z = pos.getZ(i) * s.z;
+        const ax = Math.abs(n.x), ay = Math.abs(n.y), az = Math.abs(n.z);
+        let u, v;
+        if (ay >= ax && ay >= az) { u = x; v = z; }
+        else if (ax >= az) { u = z; v = y; }
+        else { u = x; v = y; }
+        uv[i * 2] = u;
+        uv[i * 2 + 1] = v;
+      }
+      g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+      done.set(key, g);
+    }
+    o.geometry = done.get(key);
+  });
+}
 
 function canvasTex(w, h, draw, { repeat = [1, 1], srgb = true } = {}) {
   const c = document.createElement('canvas');
@@ -151,7 +245,7 @@ export function makeMaterials() {
   if (cache.size) return Object.fromEntries(cache);
   const M = {};
   const std = (o) => new THREE.MeshStandardMaterial(o);
-  M.paint = new THREE.MeshPhysicalMaterial({ color: 0xf4f5f3, roughness: 0.32, metalness: 0.05, clearcoat: 0.8, clearcoatRoughness: 0.12 });
+  M.paint = new THREE.MeshPhysicalMaterial({ color: 0xe9ebea, roughness: 0.38, metalness: 0.0, clearcoat: 1.0, clearcoatRoughness: 0.06 });
   M.paintInner = std({ color: 0xdcdcd8, roughness: 0.6 });
   M.trim = std({ color: 0x1d1f22, roughness: 0.75, metalness: 0.0 });
   M.trimGloss = std({ color: 0x15171a, roughness: 0.35, metalness: 0.2 });
@@ -160,7 +254,9 @@ export function makeMaterials() {
   M.aluDark = std({ color: 0x3a3f45, roughness: 0.5, metalness: 0.6 });
   M.steel = std({ color: 0xc6cbd0, roughness: 0.28, metalness: 0.9 });
   M.brushed = std({ color: 0xbfc4c9, roughness: 0.35, metalness: 0.85, map: noiseTexture('#c8ccd0', 26, 5, 256) });
-  M.glass = new THREE.MeshPhysicalMaterial({ color: 0x1a2430, roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.55, envMapIntensity: 1.4 });
+  M.glass = new THREE.MeshPhysicalMaterial({ color: 0x07090b, roughness: 0.03, metalness: 0.0, transparent: true, opacity: 0.86, envMapIntensity: 1.6, side: THREE.DoubleSide });
+  M.glassCab = new THREE.MeshPhysicalMaterial({ color: 0x31404c, roughness: 0.03, metalness: 0.0, transparent: true, opacity: 0.38, envMapIntensity: 1.6, side: THREE.DoubleSide });
+  M.glassPrivacy = new THREE.MeshPhysicalMaterial({ color: 0x07090b, roughness: 0.03, metalness: 0.0, transparent: true, opacity: 0.86, envMapIntensity: 1.6, side: THREE.DoubleSide });
   M.glassClear = new THREE.MeshPhysicalMaterial({ color: 0xbfd8e6, roughness: 0.05, transparent: true, opacity: 0.22 });
   M.tire = std({ color: 0x1a1a1a, roughness: 0.92, map: treadTexture() });
   M.rubber = std({ color: 0x111111, roughness: 0.9 });
@@ -169,23 +265,26 @@ export function makeMaterials() {
   M.tail = std({ color: 0x8a0f12, roughness: 0.25, emissive: 0x2a0000 });
   M.amber = std({ color: 0xd98a12, roughness: 0.3, emissive: 0x201000 });
   M.underbody = std({ color: 0x24272b, roughness: 0.9 });
-  // Interior
-  const oak = woodTexture('#d2b48c', '#a8865c', 7);
-  M.oak = std({ color: 0xffffff, map: oak, roughness: 0.55 });
-  M.walnut = std({ color: 0xffffff, map: woodTexture('#6b4a33', '#3e2a1c', 13), roughness: 0.5 });
-  M.cabinet = std({ color: 0xf1eee8, roughness: 0.55 });
-  M.cabinetEdge = std({ color: 0xffffff, map: oak, roughness: 0.5 });
-  M.floor = std({ color: 0xffffff, map: woodTexture('#b48a5f', '#7e5c3c', 19, true), roughness: 0.6 });
-  M.floor.map.repeat.set(3, 2);
+  // Interior — photographic PBR sets on metric UVs (repeat = tiles per metre)
+  const Q = Math.PI / 2;
+  M.oak = pbr('american_walnut_veneer', { repeat: 1.6, rotate: Q, normalScale: 0.3 }, { color: 0xf2cf9c, roughness: 0.62 });
+  M.oakFigured = pbr('oak_veneer_01', { repeat: 2.4, rotate: Q, normalScale: 0.35 }, { color: 0xeadfcf, roughness: 1 });
+  M.walnut = pbr('american_walnut_veneer', { repeat: 1.6, rotate: Q, normalScale: 0.3 }, { color: 0x9a7458, roughness: 0.5 });
+  M.cabinet = std({ color: 0xf1eee8, roughness: 0.62 });
+  M.cabinetEdge = M.oak;
+  M.floor = pbr('oak_wood_planks', { repeat: 0.72, normalScale: 0.6 }, { color: 0xe6d6c4, roughness: 1 });
   M.ceiling = std({ color: 0xffffff, map: slatTexture(), roughness: 0.6 });
   M.ceiling.map.repeat.set(1, 4);
-  M.felt = std({ color: 0xffffff, map: feltTexture(), roughness: 0.95 });
-  M.quartz = std({ color: 0xffffff, map: noiseTexture('#eceae4', 10, 9, 256, 600), roughness: 0.25 });
-  M.fabric = std({ color: 0xffffff, map: noiseTexture('#8c8a86', 22, 17, 256), roughness: 0.95 });
-  M.fabricDark = std({ color: 0xffffff, map: noiseTexture('#3c3f44', 18, 23, 256), roughness: 0.95 });
-  M.leather = std({ color: 0x2f2b28, roughness: 0.55 });
-  M.linen = std({ color: 0xffffff, map: noiseTexture('#e8e3d8', 12, 29, 256), roughness: 0.95 });
-  M.blanket = std({ color: 0xffffff, map: noiseTexture('#5f7a8c', 20, 41, 256), roughness: 0.95 });
+  M.felt = pbr('caban', { repeat: 2.2, normalScale: 0.8 }, { color: 0x75787c, roughness: 0.96 });
+  M.quartz = std({ color: 0xffffff, map: noiseTexture('#eceae4', 10, 9, 512, 2400), roughness: 0.22 });
+  M.quartz.map.repeat.set(1.6, 1.6);
+  M.quartz.userData.metric = true;
+  M.fabric = pbr('caban', { repeat: 3.4, normalScale: 1.0 }, { color: 0x9a948c, roughness: 0.95 });
+  M.fabricDark = pbr('caban', { repeat: 3.4, normalScale: 1.0 }, { color: 0x4a4d52, roughness: 0.95 });
+  M.leather = pbr('fabric_leather_02', { repeat: 1.6, normalScale: 0.8 }, { color: 0xc8a888, roughness: 1 });
+  M.linen = pbr('cotton_jersey', { repeat: 3, normalScale: 0.6 }, { color: 0xf0ebe2, roughness: 0.95 });
+  M.blanket = pbr('caban', { repeat: 2.6, normalScale: 1.2 }, { color: 0x5d7a8e, roughness: 0.98 });
+  M.tile = pbr('marble_01', { repeat: 1.4, normalScale: 0.6 }, { color: 0xf2efe9, roughness: 1 });
   M.ceramic = new THREE.MeshPhysicalMaterial({ color: 0x0b0b0c, roughness: 0.08, metalness: 0.1, clearcoat: 1 });
   M.screen = std({ color: 0x0b1420, roughness: 0.2, emissive: 0x08304a, emissiveIntensity: 0.8 });
   M.white = std({ color: 0xf6f6f4, roughness: 0.5 });

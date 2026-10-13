@@ -1,7 +1,8 @@
 // Assembles the complete 3D world and drives per-frame visual updates.
 import * as THREE from 'three';
 import { createStage, applyWeather, animatePrecip } from './setup.js';
-import { makeMaterials } from './materials.js';
+import { makeMaterials, applyMetricUVs } from './materials.js';
+import { setDRL } from './bodyShell.js';
 import { buildBody } from './vanBody.js';
 import { buildComponents } from './interior.js';
 import { buildSystems, Flows } from './systems.js';
@@ -46,6 +47,7 @@ export class World {
     this.viz = new Viz(scene);
     this.person = new Person();
     scene.add(this.person.root);
+    applyMetricUVs(scene);
     this.modes = new Modes(this.stage, this.M, this.body, this.comps, this.systems, this.viz, this.person);
     this.rigBody();
     this.raycaster = new THREE.Raycaster();
@@ -92,7 +94,7 @@ export class World {
     // Camera tween
     if (this.camTween) {
       const T = this.camTween;
-      T.t = Math.min(1, T.t + dt / T.dur);
+      T.t = Math.min(1, Math.max(0, T.t + dt / T.dur));
       const e = T.t < 0.5 ? 4 * T.t ** 3 : 1 - (-2 * T.t + 2) ** 3 / 2;
       this.stage.camera.position.lerpVectors(T.p0, T.p1, e);
       this.stage.controls.target.lerpVectors(T.t0, T.t1, e);
@@ -107,6 +109,8 @@ export class World {
     M.ledStrip.emissiveIntensity = 2.0 * lightFactor;
     this.stage.interior.forEach((l, i) => (l.intensity = (i === 4 ? 0.8 : 1.6) * lightFactor));
     if (this.stage.bathLight) this.stage.bathLight.intensity = 0.8 * lightFactor;
+    // Daytime running lights while driving
+    setDRL(snap?.driving ? 1 : 0);
     // Cooktop & cookware
     const ind = W.induction || 0;
     reg.cookZones.forEach((m, i) => (m.emissiveIntensity = ind > 0 ? (i === 0 ? ind / 900 : ind > 900 ? 1.2 : 0.2) : 0));
@@ -144,8 +148,7 @@ export class World {
     else this.person.root.visible = false;
     this.modes.tick(dt);
     this.stage.controls.update();
-    this.stage.renderer.render(this.stage.scene, this.stage.camera);
-    this.stage.labels.render(this.stage.scene, this.stage.camera);
+    this.stage.render();
   }
 
   pickAt(ndcX, ndcY) {

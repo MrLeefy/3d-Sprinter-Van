@@ -73,15 +73,17 @@ export const rearBuilders = {
     return g;
   },
 
-  'slideout-pod'(c, { M, rig, reg }) {
+  'slideout-pod'(c, { M, rig, reg, body }) {
     const g = new THREE.Group();
     const b = c.box;
     const mov = new THREE.Group();
-    // outer skin flush with the body side (painted to match)
-    mov.add(boxMesh(B(b.x[0], b.x[1], b.y[0], b.y[1], b.z[0], b.z[0] + 0.03), M.paint, 0.01));
-    mov.add(boxMesh(B(b.x[0], b.x[1], b.y[1] - 0.03, b.y[1], b.z[0], b.z[1]), M.grp, 0.006));
-    mov.add(boxMesh(B(b.x[0], b.x[1], b.y[0], b.y[0] + 0.03, b.z[0], b.z[1]), M.grp, 0.006));
-    for (const x of [b.x[0], b.x[1] - 0.03]) mov.add(boxMesh(B(x, x + 0.03, b.y[0], b.y[1], b.z[0], b.z[1]), M.grp, 0.006));
+    // outer skin: the patch of the lofted body side cut out for the pod (flush, same curvature)
+    const zo = -0.975; // GRP frame stays just inside the skin
+    if (body?.parts?.podSkin) mov.add(body.parts.podSkin);
+    else mov.add(boxMesh(B(b.x[0], b.x[1], b.y[0], b.y[1], b.z[0], b.z[0] + 0.03), M.paint, 0.01));
+    mov.add(boxMesh(B(b.x[0], b.x[1], b.y[1] - 0.03, b.y[1], zo, b.z[1]), M.grp, 0.006));
+    mov.add(boxMesh(B(b.x[0], b.x[1], b.y[0], b.y[0] + 0.03, zo, b.z[1]), M.grp, 0.006));
+    for (const x of [b.x[0], b.x[1] - 0.03]) mov.add(boxMesh(B(x, x + 0.03, b.y[0], b.y[1], zo, b.z[1]), M.grp, 0.006));
     // interior lining & mattress strip
     mov.add(boxMesh(B(b.x[0] + 0.03, b.x[1] - 0.03, b.y[0] + 0.03, b.y[1] - 0.03, b.z[0] + 0.03, b.z[0] + 0.04), M.felt, 0.004));
     mov.add(boxMesh(B(b.x[0] + 0.04, b.x[1] - 0.04, b.y[0] + 0.04, 1.69, b.z[0] + 0.04, b.z[1] - 0.005), M.linen, 0.04));
@@ -93,9 +95,9 @@ export const rearBuilders = {
     mov.add(pl);
     reg.ledStrips.push(pl);
     g.add(mov);
-    // seal flange on the body opening (static)
-    const fl = [B(b.x[0] - 0.03, b.x[1] + 0.03, b.y[1] - 0.005, b.y[1] + 0.025, -1.02, -1.0), B(b.x[0] - 0.03, b.x[1] + 0.03, b.y[0] - 0.025, b.y[0] + 0.005, -1.02, -1.0),
-      B(b.x[0] - 0.03, b.x[0] + 0.0, b.y[0], b.y[1], -1.02, -1.0), B(b.x[1], b.x[1] + 0.03, b.y[0], b.y[1], -1.02, -1.0)];
+    // bulb seal around the body opening (inside the skin, visible when the pod is out)
+    const fl = [B(b.x[0] - 0.02, b.x[1] + 0.02, b.y[1], b.y[1] + 0.02, -0.98, -0.95), B(b.x[0] - 0.02, b.x[1] + 0.02, b.y[0] - 0.02, b.y[0], -1.0, -0.97),
+      B(b.x[0] - 0.02, b.x[0], b.y[0], b.y[1], -0.99, -0.96), B(b.x[1], b.x[1] + 0.02, b.y[0], b.y[1], -0.99, -0.96)];
     for (const f of fl) g.add(boxMesh(f, M.rubber, 0.006));
     // telescoping rails & actuators (under the pod, inside the garage ceiling)
     const railsMov = [];

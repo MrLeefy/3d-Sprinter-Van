@@ -12,6 +12,7 @@ import { renderInspector, buildEnergy, updateEnergy, budgetHTML, buildClimate, u
 import { buildResources, runResources, buildEngineering, runEngineering } from './analysis.js';
 import { binder, hhmm, esc } from './fmt.js';
 import { FLOW_COLORS } from '../scene/materials.js';
+import { QUALITY, autoQuality } from '../scene/setup.js';
 
 const SIM_MODES = [
   ['none', 'Off', '#8d9aab'], ['thermal', 'Thermal', '#ef6c3a'], ['electrical', 'Electrical', '#f2c418'], ['water', 'Water', '#3b8ff0'],
@@ -40,7 +41,8 @@ export class App {
     this.root = root;
     root.innerHTML = layoutHTML();
     const q = new URLSearchParams(location.search);
-    this.world = new World(root.querySelector('#viewport'), { lite: q.has('lite') });
+    this.quality = q.has('lite') ? 'lite' : QUALITY[q.get('q')] ? q.get('q') : autoQuality();
+    this.world = new World(root.querySelector('#viewport'), { quality: this.quality });
     window.__app = this;
     // state
     this.master = 0;
@@ -558,7 +560,7 @@ export class App {
 
   // ── Frame loop ─────────────────────────────────────────
   frame(now) {
-    const dt = Math.min(0.05, (now - this.last) / 1000);
+    const dt = Math.max(0, Math.min(0.05, (now - this.last) / 1000)); // rAF time can precede performance.now()
     this.last = now;
     if (this.playing) {
       this.master = Math.max(0, Math.min(1, this.master + (this.playDir * dt) / 14));

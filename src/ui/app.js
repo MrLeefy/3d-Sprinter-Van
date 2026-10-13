@@ -43,7 +43,14 @@ export class App {
     this.root = root;
     root.innerHTML = layoutHTML();
     const q = new URLSearchParams(location.search);
-    this.quality = q.has('lite') ? 'lite' : QUALITY[q.get('q')] ? q.get('q') : autoQuality();
+    let saved = null;
+    try {
+      saved = localStorage.getItem('sprinter-quality');
+    } catch {
+      saved = null;
+    }
+    this.quality = q.has('lite') ? 'lite' : QUALITY[q.get('q')] ? q.get('q') : QUALITY[saved] ? saved : autoQuality();
+    this.qualityAuto = !q.get('q') && !QUALITY[saved];
     this.world = new World(root.querySelector('#viewport'), { quality: this.quality });
     window.__app = this;
     // state
@@ -141,6 +148,15 @@ export class App {
       if (this.tab === 'energy') this.refreshBudget();
     });
     $('#irCam').addEventListener('change', (e) => this.setInfrared(e.target.checked));
+    $('#quality').value = this.quality;
+    $('#quality').addEventListener('change', (e) => {
+      try {
+        localStorage.setItem('sprinter-quality', e.target.value);
+      } catch {
+        /* storage unavailable: the choice lasts until reload only */
+      }
+      location.reload();
+    });
     $('#walkBtn').addEventListener('click', () => (this.world.walker.on ? this.exitWalk() : this.enterWalk()));
     $('#walkExit').addEventListener('click', () => this.exitWalk());
     for (const b of this.root.querySelectorAll('[data-pad]')) {
@@ -615,6 +631,7 @@ export class App {
       if (Math.abs(d) < 1e-4) this.masterGoal = null;
     }
     this.tourTick(dt);
+    this.perfWatch(now);
     if (this.pumpPulse > 0) this.pumpPulse -= dt;
     // actuator targets (smooth operation of individual systems)
     for (const [id, tgt] of Object.entries(this.targets)) {
@@ -743,6 +760,18 @@ export class App {
       g.fillText(v, 220, 86 + i * 48);
     });
     s.tex.needsUpdate = true;
+  }
+
+  /** After a few seconds, suggest a lighter graphics tier if frames are slow on an auto-chosen tier. */
+  perfWatch(now) {
+    if (this.perfDone || !this.qualityAuto) return;
+    const P = (this.perf ||= { t0: now, n: 0 });
+    P.n++;
+    const el = now - P.t0;
+    if (el < 6000) return;
+    this.perfDone = true;
+    const fps = (P.n * 1000) / el;
+    if (fps < 24 && this.quality !== 'lite') this.toast(`Rendering at about ${Math.round(fps)} fps — choose a lighter Graphics setting in the View panel for smoother motion.`);
   }
 
   /** Photo mode: hide every panel so only the 3D view remains (H toggles). */
@@ -882,6 +911,7 @@ function layoutHTML() {
     <section class="sect"><h3>View</h3><div class="seg" id="views">${VIEWS.map(([k, n]) => `<button data-view="${k}" aria-pressed="${k === 'normal'}">${n}</button>`).join('')}</div>
       <div id="cutBox" hidden style="margin-top:7px"><div class="row"><select id="cutType" aria-label="Cutaway type"><option value="dollhouse">Dollhouse</option><option value="side">Side wall</option><option value="roof">Roof off</option></select><input type="range" id="cutPos" min="0" max="1" step="0.01" value="0.4" aria-label="Cut depth" style="flex:1"></div></div>
       <label class="row" style="margin-top:7px;font-size:12.5px"><input type="checkbox" id="irCam"> Infrared camera (surface temperatures)</label>
+      <label class="row" style="font-size:12.5px">Graphics <select id="quality" aria-label="Graphics quality" style="margin-left:auto;height:26px">${Object.entries(QUALITY).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('')}</select></label>
       <label class="row" style="font-size:12.5px"><input type="checkbox" id="services"> Show concealed pipes, cables & ducts</label>
       <label class="row" style="font-size:12.5px"><input type="checkbox" id="solarFit" checked> Rooftop solar fitted (optional, 1,020 Wp)</label></section>
     <section class="sect"><h3>Simulation mode</h3><div class="seg" id="sims">${SIM_MODES.map(([k, n, c]) => `<button data-sim="${k}" aria-pressed="${k === 'none'}"><span class="k" style="background:${c}"></span>${n}</button>`).join('')}</div></section>

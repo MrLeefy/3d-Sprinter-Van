@@ -5,6 +5,7 @@ import { makeMaterials, applyMetricUVs } from './materials.js';
 import { setDRL } from './bodyShell.js';
 import { Infrared } from './infrared.js';
 import { Walker } from './walk.js';
+import { addProps } from './props.js';
 import { buildBody } from './vanBody.js';
 import { buildComponents } from './interior.js';
 import { buildSystems, Flows } from './systems.js';
@@ -49,6 +50,7 @@ export class World {
     this.viz = new Viz(scene);
     this.person = new Person();
     scene.add(this.person.root);
+    addProps(this);
     applyMetricUVs(scene);
     this.modes = new Modes(this.stage, this.M, this.body, this.comps, this.systems, this.viz, this.person);
     this.ir = new Infrared(this);

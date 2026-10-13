@@ -284,6 +284,13 @@ export function makeMaterials() {
   M.leather = pbr('fabric_leather_02', { repeat: 1.6, normalScale: 0.8 }, { color: 0xc8a888, roughness: 1 });
   M.linen = pbr('cotton_jersey', { repeat: 3, normalScale: 0.6 }, { color: 0xf0ebe2, roughness: 0.95 });
   M.blanket = pbr('caban', { repeat: 2.6, normalScale: 1.2 }, { color: 0x5d7a8e, roughness: 0.98 });
+  M.duvet = pbr('cotton_jersey', { repeat: 3.5, normalScale: 0.7 }, { color: 0xe6dccb, roughness: 0.97, side: THREE.DoubleSide });
+  M.rug = pbr('caban', { repeat: 5, normalScale: 1.2 }, { color: 0x9a6a50, roughness: 1 });
+  M.rugBand = std({ color: 0x3b3430, roughness: 1 });
+  M.ceramicWhite = new THREE.MeshPhysicalMaterial({ color: 0xf1eee8, roughness: 0.35, clearcoat: 0.6 });
+  M.ceramicGlaze = new THREE.MeshPhysicalMaterial({ color: 0x2f5d62, roughness: 0.25, clearcoat: 0.8, side: THREE.DoubleSide });
+  M.soil = std({ color: 0x3a2c22, roughness: 1 });
+  M.leaf = std({ color: 0x5e8a4e, roughness: 0.6 });
   M.tile = pbr('marble_01', { repeat: 1.4, normalScale: 0.6 }, { color: 0xf2efe9, roughness: 1 });
   M.ceramic = new THREE.MeshPhysicalMaterial({ color: 0x0b0b0c, roughness: 0.08, metalness: 0.1, clearcoat: 1 });
   M.screen = std({ color: 0x0b1420, roughness: 0.2, emissive: 0x08304a, emissiveIntensity: 0.8 });

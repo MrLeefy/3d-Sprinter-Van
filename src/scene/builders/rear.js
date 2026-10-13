@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { boxMesh, boxC, B, cylBetween, pivotGroup, addWorld, tube } from '../geom.js';
 import { lerp, seg } from './common.js';
+import { duvetGeometry, pillowGeometry } from '../props.js';
 import { overhead } from './shared.js';
 
 const cyl = (r, h, mat, seg = 20) => {
@@ -51,15 +52,31 @@ export const rearBuilders = {
     const g = new THREE.Group();
     const b = c.box;
     const hingeX = -0.86;
-    const front = boxMesh(B(hingeX + 0.005, b.x[1], b.y[0], b.y[1], b.z[0], b.z[1]), M.linen, 0.05);
+    // two mattress sections in a fitted sheet; the rear one hinges up into a lounge backrest
+    const front = boxMesh(B(hingeX + 0.005, b.x[1], b.y[0], b.y[1], b.z[0], b.z[1]), M.linen, 0.06);
     g.add(front);
     const back = pivotGroup(hingeX, b.y[0], 0);
-    addWorld(back, boxMesh(B(b.x[0], hingeX - 0.005, b.y[0], b.y[1], b.z[0], b.z[1]), M.linen, 0.05));
-    // blanket & pillows
-    addWorld(back, boxMesh(B(b.x[0] + 0.02, hingeX - 0.02, b.y[1], b.y[1] + 0.03, -0.3, b.z[1] - 0.02), M.blanket, 0.015));
-    g.add(boxMesh(B(hingeX + 0.02, b.x[1] - 0.04, b.y[1], b.y[1] + 0.03, -0.3, b.z[1] - 0.02), M.blanket, 0.015));
-    for (const x of [-1.15, -0.55]) {
-      const p = boxC(x, b.y[1] + 0.06, 0.66, 0.5, 0.1, 0.3, M.linen, 0.045);
+    addWorld(back, boxMesh(B(b.x[0], hingeX - 0.005, b.y[0], b.y[1], b.z[0], b.z[1]), M.linen, 0.06));
+    // made bed: quilted duvet over both sections, turned back below the pillows
+    const made = new THREE.Group();
+    const dBack = new THREE.Mesh(duvetGeometry({ x0: b.x[0] + 0.01, x1: hingeX - 0.004, z0: b.z[0] + 0.01, z1: 0.42, y: b.y[1] - 0.012, drape: { z0: 0.05 }, seed: 2 }), M.duvet);
+    const dFront = new THREE.Mesh(duvetGeometry({ x0: hingeX + 0.004, x1: b.x[1] - 0.01, z0: b.z[0] + 0.01, z1: 0.42, y: b.y[1] - 0.012, drape: { x1: 0.1, z0: 0.05 }, seed: 5 }), M.duvet);
+    for (const m of [dBack, dFront]) m.castShadow = m.receiveShadow = true;
+    addWorld(back, dBack);
+    made.add(dFront);
+    g.add(made);
+    // folded duvet stack for lounge mode
+    const stack = boxMesh(B(-0.7, -0.24, b.y[1], b.y[1] + 0.09, b.z[0] + 0.04, b.z[0] + 0.42), M.duvet, 0.04);
+    g.add(stack);
+    // folded throw across the foot
+    g.add(boxMesh(B(-1.42, -0.98, b.y[1] + 0.012, b.y[1] + 0.05, b.z[0] + 0.05, b.z[0] + 0.32), M.blanket, 0.018));
+    // pillows (the rear one rides on the backrest)
+    const pg = pillowGeometry(0.5, 0.13, 0.32);
+    for (const [x, seed] of [[-1.15, 0], [-0.55, 1]]) {
+      const p = new THREE.Mesh(pg, M.linen);
+      p.position.set(x, b.y[1] + 0.06, 0.66);
+      p.rotation.y = (seed ? -1 : 1) * 0.04;
+      p.castShadow = p.receiveShadow = true;
       if (x < hingeX) addWorld(back, p);
       else g.add(p);
     }
@@ -69,6 +86,8 @@ export const rearBuilders = {
     rig.on('bedLounge', (v) => {
       back.rotation.z = -v * 1.1;
       strut.scale.set(1, 1 + v * 0.6, 1);
+      made.visible = dBack.visible = v < 0.04;
+      stack.visible = v >= 0.04;
     });
     return g;
   },

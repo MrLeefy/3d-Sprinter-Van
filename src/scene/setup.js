@@ -10,19 +10,22 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { loadPBR } from './materials.js';
 
+// Quality tiers. All tiers render through the composer with 4× MSAA (cheap on tile-based mobile
+// GPUs); tiers differ in resolution, shadow-map size, ambient occlusion, bloom and cabin lights,
+// and can be switched live (stage.setQuality).
 export const QUALITY = {
-  high: { label: 'High', dpr: 2, shadow: 4096, ao: true, bloom: true, msaa: 4, smaa: false, points: true },
-  medium: { label: 'Medium', dpr: 1.5, shadow: 2048, ao: false, bloom: true, msaa: 4, smaa: false, points: true },
-  low: { label: 'Low', dpr: 1, shadow: 1024, ao: false, bloom: false, msaa: 0, smaa: true, points: true },
-  lite: { label: 'Lite', dpr: 1, shadow: 0, ao: false, bloom: false, msaa: 0, smaa: false, points: false },
+  high: { label: 'High', dpr: 2, shadow: 4096, ao: true, bloom: true, points: true },
+  medium: { label: 'Medium', dpr: 1.5, shadow: 2048, ao: false, bloom: true, points: true },
+  low: { label: 'Low', dpr: 1, shadow: 1024, ao: false, bloom: false, points: true },
+  lite: { label: 'Lite', dpr: 0.85, shadow: 0, ao: false, bloom: false, points: false },
 };
+export const TIERS = ['high', 'medium', 'low', 'lite'];
 
 export function autoQuality() {
   const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) || Math.min(screen.width, screen.height) < 700;
-  return mobile ? 'low' : 'high';
+  return mobile ? 'medium' : 'high';
 }
 
 // ── Sky shader: Preetham scattering + clouds + night sky ─────────────────────
@@ -89,7 +92,7 @@ function makeSkyMaterial() {
 
 export function createStage(container, { quality = autoQuality() } = {}) {
   const Q = QUALITY[quality] || QUALITY.high;
-  const renderer = new THREE.WebGLRenderer({ antialias: Q.msaa > 0 && !Q.ao && !Q.bloom, powerPreference: 'high-performance', preserveDrawingBuffer: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, Q.dpr));
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -130,19 +133,17 @@ export function createStage(container, { quality = autoQuality() } = {}) {
   sun.target.position.set(1.4, 1, 0);
   scene.add(sun, sun.target);
 
-  // Interior point lights (switched by the lighting system)
+  // Interior point lights (switched by the lighting system; hidden on the Lite tier)
   const interior = [];
-  if (Q.points) {
-    for (const [x, z] of [[-0.95, 0.05], [0.25, -0.15], [1.3, -0.05], [2.35, 0]]) {
-      const l = new THREE.PointLight(0xffc98f, 0, 4.2, 1.7);
-      l.position.set(x, 2.42, z);
-      scene.add(l);
-      interior.push(l);
-    }
+  for (const [x, z] of [[-0.95, 0.05], [0.25, -0.15], [1.3, -0.05], [2.35, 0]]) {
+    const l = new THREE.PointLight(0xffc98f, 0, 4.2, 1.7);
+    l.position.set(x, 2.42, z);
+    scene.add(l);
+    interior.push(l);
   }
   const bathLight = new THREE.PointLight(0xfff0dc, 0, 2.2, 1.6);
   bathLight.position.set(0.25, 2.4, 0.45);
-  if (Q.points) scene.add(bathLight);
+  scene.add(bathLight);
 
   // ── Sky & image-based lighting ───────────────────────────
   const skyMat = makeSkyMaterial();
@@ -242,39 +243,57 @@ export function createStage(container, { quality = autoQuality() } = {}) {
   scene.add(snow);
 
   // ── Post-processing ──────────────────────────────────────
-  let composer = null, aoPass = null, bloomPass = null;
-  const usePost = Q.ao || Q.bloom || Q.smaa;
-  if (usePost) {
-    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
-    const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: Q.msaa });
-    composer = new EffectComposer(renderer, rt);
-    composer.addPass(new RenderPass(scene, camera));
-    if (Q.ao) {
-      aoPass = new GTAOPass(scene, camera, size.x, size.y);
-      aoPass.updateGtaoMaterial({ radius: 0.32, distanceExponent: 1.4, thickness: 1.2, scale: 1.0, samples: 12, distanceFallOff: 1.0 });
-      aoPass.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
-      aoPass.blendIntensity = 0.9;
-      composer.addPass(aoPass);
-    }
-    if (Q.bloom) {
-      bloomPass = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.42, 0.55, 1.05);
-      composer.addPass(bloomPass);
-    }
-    composer.addPass(new OutputPass());
-    if (Q.smaa) composer.addPass(new SMAAPass(size.x, size.y));
-  }
+  const size0 = renderer.getDrawingBufferSize(new THREE.Vector2());
+  const rt = new THREE.WebGLRenderTarget(size0.x, size0.y, { type: THREE.HalfFloatType, samples: 4 });
+  const composer = new EffectComposer(renderer, rt);
+  composer.addPass(new RenderPass(scene, camera));
+  const outputPass = new OutputPass();
+  composer.addPass(outputPass);
 
   const stage = {
     quality, Q, renderer, labels, scene, camera, controls, hemi, sun, interior, bathLight, sky, skyMat, ground, groundMat, setGround,
-    contact, rain, snow, fog: scene.fog, composer, aoPass, bloomPass, refreshEnv, envDirty: true, envT: 0,
+    contact, rain, snow, fog: scene.fog, composer, aoPass: null, bloomPass: null, refreshEnv, envDirty: true, envT: 0,
+    /** Switch quality tier live: resolution, shadows, AO, bloom and cabin lights. */
+    setQuality(tier) {
+      const q = QUALITY[tier] || QUALITY.high;
+      stage.quality = tier;
+      stage.Q = q;
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.dpr));
+      renderer.shadowMap.enabled = q.shadow > 0;
+      sun.castShadow = q.shadow > 0;
+      if (q.shadow && sun.shadow.mapSize.x !== q.shadow) {
+        sun.shadow.mapSize.set(q.shadow, q.shadow);
+        if (sun.shadow.map) {
+          sun.shadow.map.dispose();
+          sun.shadow.map = null;
+        }
+      }
+      const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+      if (q.ao && !stage.aoPass) {
+        const ao = new GTAOPass(scene, camera, size.x, size.y);
+        ao.updateGtaoMaterial({ radius: 0.32, distanceExponent: 1.4, thickness: 1.2, scale: 1.0, samples: 12, distanceFallOff: 1.0 });
+        ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
+        ao.blendIntensity = 0.9;
+        composer.insertPass(ao, 1);
+        stage.aoPass = ao;
+      }
+      if (stage.aoPass) stage.aoPass.enabled = q.ao;
+      if (q.bloom && !stage.bloomPass) {
+        const bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.42, 0.55, 1.05);
+        composer.insertPass(bloom, composer.passes.indexOf(outputPass));
+        stage.bloomPass = bloom;
+      }
+      if (stage.bloomPass) stage.bloomPass.enabled = q.bloom;
+      for (const l of [...interior, bathLight]) l.visible = q.points;
+      if (stage.onResize) stage.onResize();
+    },
     render() {
       if (stage.envDirty && performance.now() - stage.envT > 400) {
         stage.envDirty = false;
         stage.envT = performance.now();
         refreshEnv();
       }
-      if (composer) composer.render();
-      else renderer.render(scene, camera);
+      composer.render();
       labels.render(scene, camera);
     },
   };
@@ -283,6 +302,8 @@ export function createStage(container, { quality = autoQuality() } = {}) {
     renderer.setSize(w, h);
     labels.setSize(w, h);
     camera.aspect = w / h;
+    // Portrait screens get a wider lens so the long van still fits across
+    camera.fov = camera.aspect < 0.75 ? 54 : camera.aspect < 1.1 ? 47 : 40;
     // Centre the scene in the free area between the floating panels (desktop layout)
     const css = getComputedStyle(document.documentElement);
     const lw = parseFloat(css.getPropertyValue('--left-w')) || 0;
@@ -290,12 +311,11 @@ export function createStage(container, { quality = autoQuality() } = {}) {
     if (w > 900 && !stage.fullView) camera.setViewOffset(w, h, (rw - lw) / 2, 22, w, h);
     else camera.clearViewOffset();
     camera.updateProjectionMatrix();
-    if (composer) {
-      composer.setPixelRatio(renderer.getPixelRatio());
-      composer.setSize(w, h);
-    }
+    composer.setPixelRatio(renderer.getPixelRatio());
+    composer.setSize(w, h);
   };
   stage.onResize = onResize;
+  stage.setQuality(quality);
   requestAnimationFrame(onResize);
   window.addEventListener('resize', onResize);
   new ResizeObserver(onResize).observe(container);

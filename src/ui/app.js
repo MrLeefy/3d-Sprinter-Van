@@ -12,7 +12,7 @@ import { renderInspector, buildEnergy, updateEnergy, budgetHTML, buildClimate, u
 import { buildResources, runResources, buildEngineering, runEngineering } from './analysis.js';
 import { binder, hhmm, esc } from './fmt.js';
 import { FLOW_COLORS } from '../scene/materials.js';
-import { QUALITY, autoQuality } from '../scene/setup.js';
+import { QUALITY, TIERS, autoQuality } from '../scene/setup.js';
 import { IR_RANGE, IRONBOW_CSS } from '../scene/infrared.js';
 import { TOUR } from './tour.js';
 
@@ -86,6 +86,8 @@ export class App {
     if (q.get('ir') === '1') this.setInfrared(true);
     if (q.get('ui') === '0') this.setPhoto(true);
     this.setTab(q.get('tab') || (location.hash ? location.hash.slice(1) : 'inspect'));
+    this.values = resolveActuators(this.master, this.overrides).values;
+    this.world.rig.apply(this.values); // so the first camera fit sees deployed awning, doors and pod
     this.world.flyTo(q.get('cam') || 'exterior', 0.01);
     if (q.get('tour')) {
       this.startTour();
@@ -150,12 +152,12 @@ export class App {
     $('#irCam').addEventListener('change', (e) => this.setInfrared(e.target.checked));
     $('#quality').value = this.quality;
     $('#quality').addEventListener('change', (e) => {
+      this.setQuality(e.target.value, true);
       try {
         localStorage.setItem('sprinter-quality', e.target.value);
       } catch {
-        /* storage unavailable: the choice lasts until reload only */
+        /* storage unavailable: the choice lasts for this visit only */
       }
-      location.reload();
     });
     $('#walkBtn').addEventListener('click', () => (this.world.walker.on ? this.exitWalk() : this.enterWalk()));
     $('#walkExit').addEventListener('click', () => this.exitWalk());
@@ -762,16 +764,30 @@ export class App {
     s.tex.needsUpdate = true;
   }
 
-  /** After a few seconds, suggest a lighter graphics tier if frames are slow on an auto-chosen tier. */
+  setQuality(tier, byUser = false) {
+    this.quality = tier;
+    if (byUser) this.qualityAuto = false;
+    this.world.stage.setQuality(tier);
+    this.$('#quality').value = tier;
+  }
+
+  /** On an auto-chosen tier, step graphics down while the frame rate stays below ~26 fps. */
   perfWatch(now) {
-    if (this.perfDone || !this.qualityAuto) return;
-    const P = (this.perf ||= { t0: now, n: 0 });
+    if (!this.qualityAuto || document.hidden) return;
+    const P = (this.perf ||= { t0: now, n: 0, steps: 0 });
     P.n++;
     const el = now - P.t0;
-    if (el < 6000) return;
-    this.perfDone = true;
+    if (el < 3500) return;
     const fps = (P.n * 1000) / el;
-    if (fps < 24 && this.quality !== 'lite') this.toast(`Rendering at about ${Math.round(fps)} fps — choose a lighter Graphics setting in the View panel for smoother motion.`);
+    P.t0 = now;
+    P.n = 0;
+    if (!P.warm) return void (P.warm = true); // the first window includes shader compiles and uploads
+    const i = TIERS.indexOf(this.quality);
+    if (fps < 26 && i < TIERS.length - 1 && P.steps < 3) {
+      P.steps++;
+      this.setQuality(TIERS[i + 1]);
+      this.toast(`Graphics set to ${QUALITY[TIERS[i + 1]].label} for smoother motion (about ${Math.round(fps)} fps). Change it under View → Graphics.`);
+    } else if (fps >= 26) this.qualityAuto = false; // settled
   }
 
   /** Photo mode: hide every panel so only the 3D view remains (H toggles). */
@@ -902,7 +918,7 @@ function layoutHTML() {
   <header class="topbar">
     <div class="brand"><h1>Stealth Sprinter</h1><small>${esc(VAN.shortName)} · four-season off-grid camper · interactive engineering model</small></div>
     <div class="scn" id="scn" role="group" aria-label="Environment">${SCENARIOS.map((s) => `<button class="chip" data-scn="${s.id}" aria-pressed="false" title="${esc(s.name)}">${esc(s.short)}</button>`).join('')}</div>
-    <button class="iconbtn tourbtn" id="tourBtn" aria-pressed="false">Guided tour</button>
+    <button class="iconbtn tourbtn" id="tourBtn" aria-pressed="false"><span class="long">Guided </span>tour</button>
     <div class="clock"><span class="time" id="clockTxt">Day 1 · 13:00</span><input type="range" id="hour" min="0" max="23.99" step="0.05" value="13" aria-label="Time of day">
       <button class="iconbtn" id="clockPlay" aria-pressed="false" aria-label="Run simulated time">▶</button>
       <select id="speed" aria-label="Simulation speed"><option value="1">1 min/s</option><option value="6">6 min/s</option><option value="10" selected>10 min/s</option><option value="30">30 min/s</option><option value="60">1 h/s</option></select></div>

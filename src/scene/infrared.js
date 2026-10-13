@@ -166,7 +166,8 @@ export class Infrared {
       st.scene.fog = st.fog;
       st.scene.background = null;
       st.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      if (st.aoPass) st.aoPass.enabled = true;
+      if (st.aoPass) st.aoPass.enabled = !!st.Q.ao;
+      if (st.bloomPass) st.bloomPass.enabled = !!st.Q.bloom;
     }
     this.world.flows.group.visible = !on;
   }

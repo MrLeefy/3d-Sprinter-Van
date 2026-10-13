@@ -85,9 +85,49 @@ export class World {
     const cam = this.stage.camera, ctl = this.stage.controls;
     const t1 = new THREE.Vector3(...c.t);
     const p1 = new THREE.Vector3(...c.p);
-    // Portrait screens: back the camera off so the whole van stays in frame
-    if (cam.aspect < 1.2 && !c.inside && !['interior', 'galley'].includes(name)) p1.sub(t1).multiplyScalar(Math.min(2.3, 1.25 / Math.max(0.4, cam.aspect))).add(t1);
+    // Outside views: back off until the whole van (and anything deployed) fits this screen
+    if (!c.inside && !['interior', 'galley'].includes(name)) p1.copy(this.fitDistance(p1, t1));
     this.camTween = { t: 0, dur, p0: cam.position.clone(), t0: ctl.target.clone(), p1, t1 };
+  }
+
+  /** Extents of the van in its current configuration (doors, awning, kitchen deployed). */
+  vanBox() {
+    const v = this.rig.values || {};
+    const box = new THREE.Box3(new THREE.Vector3(-1.85, 0, -1.2), new THREE.Vector3(5.45, 3.0, 1.2));
+    if ((v.awning ?? 0) > 0.3) box.max.z = 3.3;
+    if ((v.rearDoors ?? 0) > 0.3) box.min.x = -2.75;
+    if ((v.slideOut ?? 0) > 0.3) box.min.z = -1.3;
+    return box;
+  }
+
+  /** Keep the camera direction; push it out along that line until the van box fits the frame. */
+  fitDistance(p, t) {
+    const probe = this.stage.camera.clone();
+    const box = this.vanBox();
+    const corners = [];
+    for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) corners.push(new THREE.Vector3(x, y, z));
+    const dir = p.clone().sub(t);
+    const d0 = dir.length();
+    dir.normalize();
+    const v = new THREE.Vector3();
+    const fits = (d) => {
+      probe.position.copy(t).addScaledVector(dir, d);
+      probe.lookAt(t);
+      probe.updateMatrixWorld();
+      return corners.every((c) => {
+        v.copy(c).project(probe);
+        return v.z < 1 && Math.abs(v.x) < 0.9 && Math.abs(v.y) < 0.86;
+      });
+    };
+    if (fits(d0)) return p;
+    let lo = d0, hi = d0 * 4;
+    if (!fits(hi)) return t.clone().addScaledVector(dir, hi);
+    for (let i = 0; i < 18; i++) {
+      const mid = (lo + hi) / 2;
+      if (fits(mid)) hi = mid;
+      else lo = mid;
+    }
+    return t.clone().addScaledVector(dir, hi);
   }
 
   weather(scn, wx, hour) {

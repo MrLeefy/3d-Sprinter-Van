@@ -169,7 +169,14 @@ float bodyCut(vec3 p, vec3 n) {
   }
   return d;
 }
-float gapLine(float d) { float w = fwidth(d); return 1.0 - smoothstep(0.0012, 0.0012 + w * 1.5, abs(d)); }
+// Panel gap of half-width 1.2 mm: anti-aliased, and faded to its pixel coverage when it is
+// thinner than a pixel so distant seams read as a soft line instead of dashes.
+float gapLine(float d) {
+  float aa = max(fwidth(d), 1e-5);
+  float hw = 0.0012;
+  float core = 1.0 - smoothstep(hw - 0.5 * aa, hw + 0.5 * aa, abs(d));
+  return core * clamp(2.0 * hw / aa, 0.3, 1.0);
+}
 float bodyGaps(vec3 p, vec3 n) {
   float g = 0.0;
   float az = abs(p.z);
@@ -188,8 +195,21 @@ float bodyGaps(vec3 p, vec3 n) {
   if (n.y > 0.3 && p.x > 4.45) g = max(g, gapLine(sdRR(vec2(p.x, az), vec2(4.97, 0.0), vec2(0.44, 0.8), 0.12))); // hood
   return g;
 }
-float headlightMask(vec3 p) {
-  return smoothstep(4.86, 4.875, p.x) * smoothstep(0.845, 0.852, p.y) * (1.0 - smoothstep(1.028, 1.036, p.y)) * smoothstep(0.47, 0.478, abs(p.z));
+// Swept headlight cluster: x = lens area, y = DRL light guide, z = projector chrome rings, w = projector lenses
+vec4 headlight(vec3 p) {
+  float az = abs(p.z);
+  float k = smoothstep(5.16, 4.88, p.x);
+  float yl = mix(0.858, 0.998, k * k);
+  float yu = 1.034 - 0.012 * k;
+  float aa = max(fwidth(p.y), 1e-5);
+  float m = smoothstep(yl - aa, yl + aa, p.y) * (1.0 - smoothstep(yu - aa, yu + aa, p.y));
+  m *= smoothstep(4.868, 4.884, p.x) * smoothstep(0.47, 0.48, az);
+  float drl = smoothstep(yu - 0.023, yu - 0.019, p.y) * (1.0 - smoothstep(yu - 0.012, yu - 0.008, p.y));
+  vec2 q = vec2(az, p.y);
+  float d1 = min(length(q - vec2(0.6, 0.94)), length(q - vec2(0.725, 0.95)));
+  float ring = smoothstep(0.043, 0.039, d1) * smoothstep(0.026, 0.03, d1);
+  float lens = smoothstep(0.029, 0.025, d1);
+  return vec4(m, drl * m, ring * m, lens * m);
 }
 `;
 
@@ -215,23 +235,28 @@ export function patchPaint(mat) {
         float bCut = bodyCut(vBP, vBN);
         if (bCut < 0.0) discard;`)
       .replace('#include <color_fragment>', `#include <color_fragment>
-        float bSeal = 1.0 - smoothstep(0.016, 0.019, bCut);
+        float sealAA = max(fwidth(bCut), 1e-5);
+        float bSeal = 1.0 - smoothstep(0.0175 - sealAA, 0.0175 + sealAA, bCut);
         float bGap = bodyGaps(vBP, vBN);
-        float bHL = headlightMask(vBP);
+        vec4 hl = headlight(vBP);
+        float bHL = hl.x;
         float bArch = min(length(vBP.xy - vec2(0.0, 0.395)), length(vBP.xy - vec2(4.325, 0.395)));
         float bGrime = (1.0 - smoothstep(0.56, 1.0, vBP.y)) * 0.2 + (1.0 - smoothstep(0.48, 0.78, bArch)) * 0.16 * step(0.7, abs(vBN.z));
         diffuseColor.rgb *= 1.0 - bGrime * vec3(0.9, 1.0, 1.15);
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.018), max(bSeal, bGap * 0.9));
-        vec3 hlCol = mix(vec3(0.04, 0.045, 0.05), vec3(0.55, 0.57, 0.6), smoothstep(0.86, 0.95, vBP.y) * (1.0 - smoothstep(0.97, 1.0, vBP.y)));
+        vec3 hlCol = vec3(0.035, 0.04, 0.045);
+        hlCol = mix(hlCol, vec3(0.75, 0.76, 0.78), hl.z);   // chrome bezels
+        hlCol = mix(hlCol, vec3(0.012, 0.014, 0.018), hl.w); // projector lenses
+        hlCol = mix(hlCol, vec3(0.82, 0.83, 0.85), hl.y);    // frosted DRL light guide
         diffuseColor.rgb = mix(diffuseColor.rgb, hlCol, bHL);`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
         roughnessFactor = mix(roughnessFactor, 0.55, bSeal);
         roughnessFactor = mix(roughnessFactor, 0.06, bHL);
         roughnessFactor = min(1.0, roughnessFactor + bGrime * 0.5);`)
       .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
-        metalnessFactor = mix(metalnessFactor, 0.85, bHL * 0.8);`)
+        metalnessFactor = mix(metalnessFactor, 0.9, bHL * (0.55 + 0.4 * hl.z) * (1.0 - hl.y));`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-        float bDRL = bHL * smoothstep(1.0, 1.005, vBP.y) * (1.0 - smoothstep(1.016, 1.021, vBP.y));
+        float bDRL = hl.y;
         totalEmissiveRadiance += vec3(1.0, 0.97, 0.92) * bDRL * uDRL * 8.0;`)
       .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
         #ifdef USE_CLEARCOAT
@@ -254,7 +279,8 @@ export function patchGlass(mat) {
       .replace('#include <color_fragment>', `#include <color_fragment>
         float frit = smoothstep(-0.055, -0.05, bCut) * step(abs(vBP.z), 0.9) * step(3.86, vBP.x);
         vec2 dg = fract(vec2(vBP.z, vBP.x * 2.04) * 160.0) - 0.5;
-        float dots = step(length(dg), 0.32) * smoothstep(-0.075, -0.055, bCut);
+        float dotPx = fwidth(vBP.z * 160.0) + fwidth(vBP.x * 2.04 * 160.0);
+        float dots = mix(step(length(dg), 0.32), 0.3, smoothstep(0.15, 0.45, dotPx)) * smoothstep(-0.075, -0.055, bCut);
         float wsMask = step(abs(vBP.z), 0.9) * step(3.86, vBP.x);
         frit *= wsMask;
         dots *= wsMask;

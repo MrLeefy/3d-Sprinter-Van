@@ -136,6 +136,13 @@ export class Modes {
     for (const [k, g] of Object.entries(this.systems.groups)) {
       g.visible = view !== 'exploded' && (routes.includes(k) || (showAll && !focus));
     }
+    // Occupant keeps its own materials (restored here after the infrared view)
+    this.person.root.traverse((m) => {
+      if (!m.isMesh) return;
+      if (!m.userData.origMat) m.userData.origMat = m.material;
+      m.material = m.userData.origMat;
+    });
+    if (this.ir && this.infrared) this.infrared.applyMaterials(cut);
     this.viz.thermal.visible = this.sim === 'thermal';
     this.viz.setMechVisible(this.sim === 'mechanical', this.activeAct);
     this.person.root.visible = this.person.root.visible && this.sim === 'living';
@@ -209,7 +216,7 @@ export class Modes {
         if (!ghostHit) ghostHit = { cid, kind: o.userData.kind, point: h.point, route: o.userData.route };
         continue;
       }
-      return { cid, kind: o.userData.kind, point: h.point, route: o.userData.route };
+      return { cid, kind: o.userData.kind, point: h.point, route: o.userData.route, object: o, face: h.face };
     }
     return ghostHit;
   }

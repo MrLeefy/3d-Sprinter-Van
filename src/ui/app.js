@@ -13,6 +13,7 @@ import { buildResources, runResources, buildEngineering, runEngineering } from '
 import { binder, hhmm, esc } from './fmt.js';
 import { FLOW_COLORS } from '../scene/materials.js';
 import { QUALITY, autoQuality } from '../scene/setup.js';
+import { IR_RANGE, IRONBOW_CSS } from '../scene/infrared.js';
 
 const SIM_MODES = [
   ['none', 'Off', '#8d9aab'], ['thermal', 'Thermal', '#ef6c3a'], ['electrical', 'Electrical', '#f2c418'], ['water', 'Water', '#3b8ff0'],
@@ -74,6 +75,7 @@ export class App {
     if (q.get('view')) this.setView(q.get('view'));
     if (q.get('sim')) this.setSim(q.get('sim'));
     if (q.get('hour')) this.setHour(parseFloat(q.get('hour')));
+    if (q.get('ir') === '1') this.setInfrared(true);
     this.setTab(q.get('tab') || (location.hash ? location.hash.slice(1) : 'inspect'));
     this.world.flyTo(q.get('cam') || 'exterior', 0.01);
     this.last = performance.now();
@@ -131,6 +133,7 @@ export class App {
       this.toast(on ? 'Solar fitted: 3 × 340 W on the rack.' : 'Solar removed: the van now relies on the alternator and shore power to recharge.');
       if (this.tab === 'energy') this.refreshBudget();
     });
+    $('#irCam').addEventListener('change', (e) => this.setInfrared(e.target.checked));
     $('#services').addEventListener('change', (e) => {
       this.world.modes.showServices = e.target.checked;
       this.world.modes.apply();
@@ -185,8 +188,14 @@ export class App {
       const hit = this.pickEvent(e);
       const tip = $('#tip');
       const name = hit ? (hit.feature ? hit.feature.label : hit.cid === 'van-body' ? 'Base vehicle' : hit.cid === 'occupant' ? 'Occupant' : byId[hit.cid]?.name) : null;
+      let temp = '';
+      if (name && this.ir && hit.object) {
+        const n = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : null;
+        const T = this.world.ir.sample(hit.object, hit.point, n);
+        if (T != null) temp = ` · ${T.toFixed(1)} °C`;
+      }
       if (name) {
-        tip.textContent = name;
+        tip.textContent = name + temp;
         tip.hidden = false;
         tip.style.left = `${e.clientX + 14}px`;
         tip.style.top = `${e.clientY + 12}px`;
@@ -628,6 +637,7 @@ export class App {
   }
 
   updateUI() {
+    this.updateIrScale();
     const h = this.hour();
     const day = Math.floor(this.simState.t / 24) + 1;
     this.$('#clockTxt').textContent = `Day ${day} · ${hhmm(h)}`;
@@ -695,6 +705,22 @@ export class App {
     s.tex.needsUpdate = true;
   }
 
+  setInfrared(on) {
+    this.ir = on;
+    this.$('#irCam').checked = on;
+    this.world.setInfrared(on);
+    this.$('#irScale').hidden = !on;
+    this.snapT = 0;
+  }
+
+  updateIrScale() {
+    if (!this.ir) return;
+    const lo = IR_RANGE.min, hi = IR_RANGE.max;
+    this.$('#irMin').textContent = `${lo} °C`;
+    this.$('#irMid').textContent = `${Math.round((lo + hi) / 2)} °C`;
+    this.$('#irMax').textContent = `${hi} °C`;
+  }
+
   renderLegend() {
     const s = this.world.modes.sim;
     const box = this.$('#legendbox');
@@ -732,7 +758,8 @@ function layoutHTML() {
   <aside class="panel left" id="left" data-open="false">
     <section class="sect"><h3>View</h3><div class="seg" id="views">${VIEWS.map(([k, n]) => `<button data-view="${k}" aria-pressed="${k === 'normal'}">${n}</button>`).join('')}</div>
       <div id="cutBox" hidden style="margin-top:7px"><div class="row"><select id="cutType" aria-label="Cutaway type"><option value="dollhouse">Dollhouse</option><option value="side">Side wall</option><option value="roof">Roof off</option></select><input type="range" id="cutPos" min="0" max="1" step="0.01" value="0.4" aria-label="Cut depth" style="flex:1"></div></div>
-      <label class="row" style="margin-top:7px;font-size:12.5px"><input type="checkbox" id="services"> Show concealed pipes, cables & ducts</label>
+      <label class="row" style="margin-top:7px;font-size:12.5px"><input type="checkbox" id="irCam"> Infrared camera (surface temperatures)</label>
+      <label class="row" style="font-size:12.5px"><input type="checkbox" id="services"> Show concealed pipes, cables & ducts</label>
       <label class="row" style="font-size:12.5px"><input type="checkbox" id="solarFit" checked> Rooftop solar fitted (optional, 1,020 Wp)</label></section>
     <section class="sect"><h3>Simulation mode</h3><div class="seg" id="sims">${SIM_MODES.map(([k, n, c]) => `<button data-sim="${k}" aria-pressed="${k === 'none'}"><span class="k" style="background:${c}"></span>${n}</button>`).join('')}</div></section>
     <section class="sect"><h3>Camera</h3><div class="seg three" id="cams">${Object.keys(CAMERAS).map((k) => `<button data-cam="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div></section>
@@ -750,6 +777,7 @@ function layoutHTML() {
     <div class="track"><input type="range" id="master" min="0" max="1" step="0.001" value="0" aria-label="Master transformation"><div class="ticks">${ticks}</div></div>
   </div>
   <div class="legendbox" id="legendbox" hidden></div>
+  <div class="irscale" id="irScale" hidden><div class="subhead">Infrared · surface °C</div><div class="grad" style="background:${IRONBOW_CSS}"></div><div class="irt"><span id="irMin"></span><span id="irMid"></span><span id="irMax"></span></div><p class="note">Estimated from the live envelope model (sol-air, U-values, stratification, appliance heat) — not a measured image. Hover any surface for its temperature.</p></div>
   <div class="caption" id="caption" hidden></div>
   <div class="caption" id="timelineBox" hidden style="top:auto;bottom:104px;flex-direction:column;align-items:stretch;width:min(560px,calc(100% - 32px))"><div class="timeline" id="timeline">${tl}</div><div class="legend"><span><i style="background:#3d4f7a"></i>sleep</span><span><i style="background:#f2a33a"></i>cooking</span><span><i style="background:#a98bff"></i>work</span><span><i style="background:#3b8ff0"></i>shower</span><span><i style="background:#49c98b"></i>outside</span><span><i style="background:#8d9aab"></i>other</span></div></div>
   <div class="toasts" id="toasts" aria-live="polite"></div>

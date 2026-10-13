@@ -391,6 +391,7 @@ export function buildShell(M) {
     const m = new THREE.Mesh(subGeometry(tris, pos, nor), M.paint);
     m.castShadow = m.receiveShadow = true;
     m.customDepthMaterial = depth;
+    m.userData.irProfile = 'shell'; // infrared: back faces show the cabin side of the skin
     if (explodeDir) m.userData.explodeDir = explodeDir;
     return m;
   };
@@ -434,6 +435,7 @@ export function buildShell(M) {
   rearCap.position.x = XR + 0.008;
   rearCap.castShadow = rearCap.receiveShadow = true;
   rearCap.userData.explodeDir = [-1.3, 0, 0];
+  rearCap.userData.irProfile = 'shell';
   const fg = new THREE.ExtrudeGeometry(capShape(halfSection(XF)), { depth: 0.02, bevelEnabled: false });
   fg.rotateY(Math.PI / 2);
   const frontCap = new THREE.Mesh(fg, M.paint);

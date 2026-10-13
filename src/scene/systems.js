@@ -74,85 +74,96 @@ export function buildSystems() {
   return { root, groups, routes, air };
 }
 
-/** Instanced particle flows along sampled paths. */
+// ── Animated flow streams ───────────────────────────────────────────────────
+// Each route gets a thin additive tube whose shader scrolls bright "comets" along it; speed and
+// direction follow the live simulation (litres, amps, airflow), so bloom makes them glow.
+const STREAM_VERT = /* glsl */ `
+varying vec2 vUv;
+varying vec3 vN;
+varying vec3 vV;
+void main() {
+  vUv = uv;
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vN = normalize(mat3(modelMatrix) * normal);
+  vV = normalize(cameraPosition - wp.xyz);
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}`;
+const STREAM_FRAG = /* glsl */ `
+uniform vec3 uColor;
+uniform float uPhase, uLen, uSpacing, uOpacity, uDir, uSoft;
+varying vec2 vUv;
+varying vec3 vN;
+varying vec3 vV;
+void main() {
+  float f = fract(vUv.x * uLen / uSpacing - uPhase);
+  if (uDir < 0.0) f = 1.0 - f;
+  float comet = pow(f, mix(7.0, 2.2, uSoft)) * (1.0 - smoothstep(0.88, 1.0, f));
+  float facing = abs(dot(normalize(vN), normalize(vV)));
+  float core = 0.25 + 0.75 * pow(facing, 0.7);
+  float ends = smoothstep(0.0, 0.02, vUv.x) * (1.0 - smoothstep(0.98, 1.0, vUv.x));
+  float a = (0.1 + 0.9 * comet) * core * ends * uOpacity;
+  gl_FragColor = vec4(uColor * (0.5 + 2.8 * comet), a);
+}`;
+
 export class Flows {
   constructor(scene) {
     this.group = new THREE.Group();
     this.group.name = 'flows';
     scene.add(this.group);
     this.sets = [];
-    this.dummy = new THREE.Object3D();
-    this.color = new THREE.Color();
   }
 
-  /** paths: [{id, kind, samples, len}], opts: { radius, density, shape } */
-  addSet(name, paths, { radius = 0.012, density = 10, shape = 'sphere', max = 3000 } = {}) {
+  /** paths: [{id, kind, samples, len}], opts: { radius, spacing, soft } */
+  addSet(name, paths, { radius = 0.012, spacing = 0.35, soft = 0 } = {}) {
+    const g = new THREE.Group();
+    g.name = `flow-${name}`;
+    g.visible = false;
     const items = [];
     for (const p of paths) {
-      const n = Math.max(2, Math.min(60, Math.round(p.len * density)));
-      for (let i = 0; i < n; i++) items.push({ path: p, u: i / n + Math.random() * 0.02 });
+      if (!p.samples || p.samples.length < 2 || !(p.len > 0.02)) continue;
+      const curve = new THREE.CatmullRomCurve3(p.samples, false, 'centripetal', 0.5);
+      const geo = new THREE.TubeGeometry(curve, Math.max(8, Math.min(320, Math.round(p.len * 45))), radius, 7, false);
+      const mat = new THREE.ShaderMaterial({
+        uniforms: {
+          uColor: { value: new THREE.Color(FLOW_COLORS[p.kind] ?? 0xffffff) }, uPhase: { value: Math.random() },
+          uLen: { value: p.len }, uSpacing: { value: spacing }, uOpacity: { value: 1 }, uDir: { value: 1 }, uSoft: { value: soft },
+        },
+        vertexShader: STREAM_VERT,
+        fragmentShader: STREAM_FRAG,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.renderOrder = 5;
+      mesh.frustumCulled = false;
+      g.add(mesh);
+      items.push({ path: p, mesh, mat });
     }
-    const count = Math.min(items.length, max);
-    const geo = shape === 'arrow' ? new THREE.ConeGeometry(radius, radius * 3.2, 8).rotateX(Math.PI / 2) : new THREE.SphereGeometry(radius, 8, 6);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false });
-    const mesh = new THREE.InstancedMesh(geo, mat, count);
-    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    mesh.frustumCulled = false;
-    mesh.renderOrder = 5;
-    for (let i = 0; i < count; i++) {
-      this.color.setHex(FLOW_COLORS[items[i].path.kind] ?? 0xffffff);
-      mesh.setColorAt(i, this.color);
-    }
-    this.group.add(mesh);
-    const set = { name, items: items.slice(0, count), mesh, shape, visible: false };
-    mesh.visible = false;
+    this.group.add(g);
+    const set = { name, group: g, items, spacing, visible: false };
     this.sets.push(set);
     return set;
   }
 
   setVisible(name, v) {
-    for (const s of this.sets) if (s.name === name) s.visible = s.mesh.visible = v;
+    for (const s of this.sets) if (s.name === name) s.visible = s.group.visible = v;
   }
 
-  /** speedFn(path) → m/s (0 hides particles of that path; negative reverses) */
+  /** speedFn(set, path) → m/s (0 hides that stream; negative reverses it) */
   update(dt, speedFn) {
-    const d = this.dummy;
-    const tmp = new THREE.Vector3();
     for (const s of this.sets) {
       if (!s.visible) continue;
-      const speeds = new Map();
-      let i = 0;
       for (const it of s.items) {
-        const p = it.path;
-        let sp = speeds.get(p);
-        if (sp === undefined) {
-          sp = speedFn(s.name, p);
-          speeds.set(p, sp);
-        }
-        if (!sp) {
-          d.position.set(0, -50, 0);
-          d.scale.setScalar(0.0001);
-          d.updateMatrix();
-          s.mesh.setMatrixAt(i++, d.matrix);
-          continue;
-        }
-        it.u = ((((it.u + (sp * dt) / Math.max(p.len || 0, 0.05)) % 1) + 1) % 1) || 0;
-        const n = p.samples.length;
-        const f = it.u * (n - 1);
-        const k = Math.min(n - 2, Math.max(0, Math.floor(f)));
-        const a = p.samples[k], b = p.samples[k + 1] || a;
-        d.position.lerpVectors(a, b, f - k);
-        if (s.shape === 'arrow') {
-          tmp.subVectors(b, a);
-          if (sp < 0) tmp.negate();
-          if (tmp.lengthSq() > 1e-8) d.lookAt(tmp.add(d.position));
-        }
-        const fade = Math.min(1, it.u * 8, (1 - it.u) * 8);
-        d.scale.setScalar(0.35 + 0.65 * fade);
-        d.updateMatrix();
-        s.mesh.setMatrixAt(i++, d.matrix);
+        const sp = speedFn(s.name, it.path) || 0;
+        it.mesh.visible = sp !== 0;
+        if (!sp) continue;
+        const u = it.mat.uniforms;
+        u.uPhase.value = (u.uPhase.value + (Math.abs(sp) * dt) / s.spacing) % 1000;
+        u.uDir.value = sp < 0 ? -1 : 1;
+        u.uOpacity.value = Math.min(1, 0.35 + Math.abs(sp) * 0.75);
       }
-      s.mesh.instanceMatrix.needsUpdate = true;
     }
   }
 }

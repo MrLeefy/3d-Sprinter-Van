@@ -1,8 +1,9 @@
 // Assembles the complete 3D world and drives per-frame visual updates.
 import * as THREE from 'three';
-import { createStage, applyWeather, animatePrecip } from './setup.js';
+import { createStage, applyWeather, animatePrecip, sunDirection } from './setup.js';
 import { makeMaterials, applyMetricUVs } from './materials.js';
 import { setDRL } from './bodyShell.js';
+import { Infrared } from './infrared.js';
 import { buildBody } from './vanBody.js';
 import { buildComponents } from './interior.js';
 import { buildSystems, Flows } from './systems.js';
@@ -40,15 +41,17 @@ export class World {
     this.systems = buildSystems();
     scene.add(this.systems.root);
     this.flows = new Flows(scene);
-    this.flows.addSet('water', this.systems.routes.filter((r) => r.sys === 'water'), { radius: 0.011, density: 9 });
-    this.flows.addSet('electrical', this.systems.routes.filter((r) => r.sys === 'electrical'), { radius: 0.009, density: 10 });
-    this.flows.addSet('ducts', this.systems.routes.filter((r) => r.sys === 'air'), { radius: 0.02, density: 6 });
-    this.flows.addSet('air', this.systems.air, { radius: 0.022, density: 7, shape: 'arrow' });
+    this.flows.addSet('water', this.systems.routes.filter((r) => r.sys === 'water'), { radius: 0.016, spacing: 0.32 });
+    this.flows.addSet('electrical', this.systems.routes.filter((r) => r.sys === 'electrical'), { radius: 0.013, spacing: 0.28 });
+    this.flows.addSet('ducts', this.systems.routes.filter((r) => r.sys === 'air'), { radius: 0.024, spacing: 0.45, soft: 0.6 });
+    this.flows.addSet('air', this.systems.air, { radius: 0.03, spacing: 0.5, soft: 1 });
     this.viz = new Viz(scene);
     this.person = new Person();
     scene.add(this.person.root);
     applyMetricUVs(scene);
     this.modes = new Modes(this.stage, this.M, this.body, this.comps, this.systems, this.viz, this.person);
+    this.ir = new Infrared(this);
+    this.modes.infrared = this.ir;
     this.rigBody();
     this.raycaster = new THREE.Raycaster();
     this.camTween = null;
@@ -84,7 +87,8 @@ export class World {
 
   weather(scn, wx, hour) {
     applyWeather(this.stage, scn, wx, hour);
-    this.sunDir.copy(this.stage.sun.position).normalize();
+    this.sunDir.copy(sunDirection(scn, wx, hour));
+    if (this.ir.on) this.ir.setStage(true);
   }
 
   /** Per-frame visual update from actuator values and the simulation snapshot. */
@@ -143,12 +147,19 @@ export class World {
       this.uaCache = envelopeUA({ covers: snap.covers, podOut: snap.podOut });
       this.viz.updateThermal(dt, snap, this.uaCache, this.sunDir);
     }
+    this.ir.update(snap, this.sunDir);
     animatePrecip(this.stage, dt);
     if (this.modes.sim === 'living') this.person.update(dt);
     else this.person.root.visible = false;
     this.modes.tick(dt);
     this.stage.controls.update();
     this.stage.render();
+  }
+
+  setInfrared(on) {
+    this.ir.setStage(on);
+    this.modes.ir = on;
+    this.modes.apply();
   }
 
   pickAt(ndcX, ndcY) {

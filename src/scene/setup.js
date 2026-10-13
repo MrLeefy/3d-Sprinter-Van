@@ -266,7 +266,7 @@ export function createStage(container, { quality = autoQuality() } = {}) {
 
   const stage = {
     quality, Q, renderer, labels, scene, camera, controls, hemi, sun, interior, bathLight, sky, skyMat, ground, groundMat, setGround,
-    contact, rain, snow, composer, aoPass, bloomPass, refreshEnv, envDirty: true, envT: 0,
+    contact, rain, snow, fog: scene.fog, composer, aoPass, bloomPass, refreshEnv, envDirty: true, envT: 0,
     render() {
       if (stage.envDirty && performance.now() - stage.envT > 400) {
         stage.envDirty = false;
@@ -353,9 +353,9 @@ export function applyWeather(stage, scn, wx, hour) {
   stage.renderer.toneMappingExposure = night ? 1.45 : 1.0;
   const fogCol = new THREE.Color().setHSL(0.6, 0.15, 0.08 + 0.55 * dayK);
   if (!night) fogCol.lerp(new THREE.Color(v.horizon), 0.6);
-  stage.scene.fog.color.copy(fogCol);
-  stage.scene.fog.near = wx.rain ? 18 : 80 - (v.haze ?? 0) * 50;
-  stage.scene.fog.far = wx.rain ? 130 : 420 - (v.haze ?? 0) * 250;
+  stage.fog.color.copy(fogCol);
+  stage.fog.near = wx.rain ? 18 : 80 - (v.haze ?? 0) * 50;
+  stage.fog.far = wx.rain ? 130 : 420 - (v.haze ?? 0) * 250;
   stage.rain.visible = !!wx.rain;
   stage.snow.visible = (wx.snow ?? 0) > 0;
   stage.contact.material.opacity = night ? 0.5 : 0.75 + 0.25 * cloud;

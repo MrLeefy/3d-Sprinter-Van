@@ -52,7 +52,7 @@ export function buildBody(M) {
   const glass = [];
   const linings = [];
   const insulation = [];
-  const parts = {};
+  const parts = { wheels: [] };
   const tag = (m, cid = 'van-body', kind = 'body') => {
     m.userData.cid = cid;
     m.userData.kind = kind;
@@ -251,9 +251,12 @@ export function buildBody(M) {
   for (const x of [0, 4.325]) {
     for (const s of [-1, 1]) {
       const w = buildWheel(M, s);
-      w.position.set(x, 0.395, s * 0.865);
-      w.traverse((m) => tag(m, 'van-body', 'wheel'));
-      root.add(w);
+      const hub = new THREE.Group(); // steers (front) around the kingpin; the wheel spins inside it
+      hub.position.set(x, 0.395, s * 0.865);
+      hub.add(w);
+      hub.traverse((m) => tag(m, 'van-body', 'wheel'));
+      root.add(hub);
+      parts.wheels.push({ hub, wheel: w, front: x > 1, side: s });
       // arch liner
       const liner = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.47, 0.3, 32, 1, true, -Math.PI / 2 - 1.25, 2.5), M.underbody);
       liner.rotation.x = Math.PI / 2;

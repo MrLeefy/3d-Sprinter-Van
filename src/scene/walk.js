@@ -112,7 +112,9 @@ export class Walker {
     const moved = f || s ? this.tryMove(f * SPEED * dt, s * SPEED * dt * 0.8) : 0;
     this.bob += moved * 9;
     const cam = this.world.stage.camera;
-    cam.position.set(this.pos.x, this.pos.y + EYE + Math.sin(this.bob) * 0.012, this.pos.z);
+    // the van may sit on a slope: walk on its floor, keep the horizon level
+    this.world.vanRoot.updateMatrixWorld();
+    cam.position.copy(this.world.vanRoot.localToWorld(new THREE.Vector3(this.pos.x, this.pos.y + EYE + Math.sin(this.bob) * 0.012, this.pos.z)));
     cam.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
     cam.updateMatrixWorld();
   }

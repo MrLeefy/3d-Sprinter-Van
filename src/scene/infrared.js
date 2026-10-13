@@ -153,8 +153,7 @@ export class Infrared {
     st.sky.visible = !on;
     st.contact.visible = !on;
     if (on) {
-      if (!this.savedGround) this.savedGround = st.ground.material;
-      st.ground.material = this.groundMat;
+      this.world.terrain.setMaterial(this.groundMat);
       st.scene.fog = null;
       st.renderer.toneMapping = THREE.NoToneMapping;
       st.renderer.toneMappingExposure = 1;
@@ -162,7 +161,7 @@ export class Infrared {
       if (st.bloomPass) st.bloomPass.strength = 0.25;
       st.rain.visible = st.snow.visible = false;
     } else {
-      if (this.savedGround) st.ground.material = this.savedGround;
+      this.world.terrain.setMaterial(null);
       st.scene.fog = st.fog;
       st.scene.background = null;
       st.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -170,7 +169,6 @@ export class Infrared {
       if (st.bloomPass) st.bloomPass.enabled = !!st.Q.bloom;
     }
     this.world.flows.group.visible = !on;
-    this.world.surroundings.group.visible = !on;
   }
 
   /** Recompute every profile temperature from the snapshot. */
@@ -260,6 +258,7 @@ export class Infrared {
     const snowy = (wx.snow ?? 0) > 0 || To < -2;
     gu.uT.value = snowy ? Math.min(0, To + 1) : To + (sunUp ? 0.018 * G : -2 * (1 - cloud));
     gu.uTback.value = gu.uT.value;
+    gu.uCabT.value = gu.uT.value;
     gu.uSky.value = 0;
     gu.uSolar.value = 0;
     const st = this.world.stage;

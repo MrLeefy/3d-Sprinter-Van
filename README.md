@@ -35,6 +35,7 @@ npm run build:single  # one-file page: dist-single/stealth-sprinter.html (three.
 | **Water** | Tank levels, run taps and showers, refill, dump, empty the toilet, simulate a leak (pump lock-out), winterise; freeze-protection status. |
 | **Resources** | Multi-day simulation with battery, temperature, water and air-quality charts, energy by use, and endurance until the first resource runs out. |
 | **Engineering** | Live acceptance tests plus weight & axle loads, capacities, heating/cooling demand, space use, cost estimate, items needing licensed sign-off and labelled assumptions. |
+| **Drive** (top bar) | Everything stows first (travel interlock), then drive anywhere in an endless, generated landscape: a winding track, forests, lakes (ice in winter), rocks and mesas. The van's real mass, power, drag and per-surface grip set acceleration, top speed, braking, understeer, slides and wheelspin on slopes; the body pitches and rolls on the terrain. Chase, cockpit, orbit and cinematic cameras; minimap; headlights and brake lights; synthesised engine sound. The engine charges the house battery through the DC-DC chargers and burns fuel at the live speed. Park anywhere and the slope is reported. Keyboard (W A S D, Space, C, L) or on-screen wheel and pedals. |
 | **Guided tour** (top bar) | Twelve scripted stops — stealth exterior, roof, service garage, live power, galley, wet bath, sealed ventilation, infrared, slide-out pod, full camp, daily living and honest limits. Play, pause or step. |
 | **Walk inside** | First-person at eye height: drag to look, W A S D / arrows / on-screen pad to walk. Collisions come from the component catalogue, so the walk respects the real aisle. Click anything to inspect it. |
 | **Infrared camera** | Every surface shaded by its estimated temperature (ironbow palette, auto-ranged scale): sol-air heating, night-sky cooling, U-value losses, stratified cabin air and live appliance heat. Hover for °C. |
@@ -51,8 +52,10 @@ npm run build:single  # one-file page: dist-single/stealth-sprinter.html (three.
   the same signed-distance functions.
 - LT245/75R16 all-terrain tyres (instanced tread blocks, sidewall lettering) on 16" six-spoke
   alloys with brake discs and calipers.
-- Each scenario dresses the site: rolling ground, distant hills or desert mesas, pine tree
-  lines (snow-laden in winter), wind-swayed grass, dry shrubs and rocks; a warm camp light
+- Endless world: the van stays at the scene origin and the terrain is streamed in 48 m chunks
+  around it (floating origin), so every view mode, the walk-through and infrared work
+  anywhere. Each scenario sets the relief, track surface, water or ice, forests, grass that
+  sways in the wind, shrubs, rocks and a horizon of hills or desert mesas; a warm camp light
   hangs under the awning after dark.
 - CC0 photographic PBR textures (wood, leather, fabric, ground) on metric UVs; glowing
   shader streams show water, current and airflow moving at their simulated rates.

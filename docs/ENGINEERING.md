@@ -258,6 +258,24 @@ temperatures. It is an estimate for explanation, not a measured image:
 - Apparent temperature drifts toward the reflected sky temperature at grazing angles (lower
   emissivity), as a real thermal camera shows on glass and gloss paint.
 
+### Drive model (visual demonstration)
+
+`src/scene/drive.js` is a kinematic bicycle model (rear-axle reference, 4.325 m wheelbase,
+29° maximum road-wheel angle ≈ 15.6 m turning circle) with longitudinal dynamics:
+
+- **Mass:** the laden mass from the weight model (≈ 3,770 kg).
+- **Drive:** 125 kW at the wheels (2.0 L diesel), 9.8 kN first-gear limit, rear-wheel drive
+  with ≈ 62 % of the weight on the driven axle, so traction is μ · m · g · 0.62.
+- **Resistance:** rolling resistance by surface (track 0.016, grass 0.045, sand 0.07, mud
+  0.06, snow 0.035, ice 0.012) plus aero drag with Cd·A = 0.37 × 4.6 m² and the grade force.
+- **Grip:** braking and cornering are limited by μ (track 0.8, wet track 0.6, grass 0.55,
+  sand 0.5, mud 0.4, packed snow 0.38, snow 0.3, ice 0.12), with an understeer gradient.
+  Climbing a grade steeper than the grip allows causes wheelspin. The van refuses water
+  deeper than about 0.6 m.
+- **Energy:** while the engine runs, the simulation charges the house bank from the two
+  50 A DC-DC chargers and burns fuel at 0.9 L/h idle plus a speed term (≈ 12 L/100 km at
+  70–100 km/h).
+
 ## 11. Acceptance tests
 
 `npm test` runs 85 node tests. Of the 76 engineering checks, 73 pass, 3 warn and 0 fail. They

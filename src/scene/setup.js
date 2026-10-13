@@ -37,6 +37,7 @@ uniform float uTime;
 uniform vec3 uGround;
 uniform vec3 uCloudTint;
 uniform vec3 uMoonDir;
+uniform float uYaw;
 float h21(vec2 p){ p = fract(p*vec2(123.34, 456.21)); p += dot(p, p+45.32); return fract(p.x*p.y); }
 float vnoise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
   return mix(mix(h21(i),h21(i+vec2(1,0)),f.x), mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x), f.y); }
@@ -53,7 +54,9 @@ function makeSkyMaterial() {
       float up01 = max(direction.y, 0.0);
       // night sky gradient & stars
       vec3 nightCol = mix(vec3(0.020, 0.030, 0.060), vec3(0.004, 0.007, 0.018), pow(up01, 0.5));
-      vec2 sg = floor(direction.xz / max(direction.y, 0.05) * 90.0 + direction.y * 300.0);
+      // stars and clouds are fixed to the world, so undo the floating-origin heading
+      vec3 wdir = vec3(direction.x * cos(uYaw) + direction.z * sin(uYaw), direction.y, -direction.x * sin(uYaw) + direction.z * cos(uYaw));
+      vec2 sg = floor(wdir.xz / max(wdir.y, 0.05) * 90.0 + wdir.y * 300.0);
       float star = step(0.9965, h21(sg)) * smoothstep(0.02, 0.25, direction.y) * (0.6 + 0.4 * sin(uTime * 3.0 + h21(sg + 7.0) * 40.0));
       nightCol += vec3(star) * 0.9;
       float md = dot(direction, uMoonDir);
@@ -61,7 +64,7 @@ function makeSkyMaterial() {
       retColor = mix(retColor, nightCol, uNight);
       // procedural cloud layer
       if (direction.y > 0.0) {
-        vec2 cuv = direction.xz / (direction.y + 0.08) * 0.9 + vec2(uTime * 0.004, uTime * 0.0015);
+        vec2 cuv = wdir.xz / (wdir.y + 0.08) * 0.9 + vec2(uTime * 0.004, uTime * 0.0015);
         float n = fbm(cuv * 1.6);
         float cov = smoothstep(1.02 - uCloud * 0.95, 1.12 - uCloud * 0.6, n + 0.28);
         float sunGlow = pow(max(dot(direction, vSunDirection), 0.0), 6.0);
@@ -81,7 +84,7 @@ function makeSkyMaterial() {
     name: 'StealthSky',
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsUtils.clone(S.uniforms), {
       uExposure: { value: 1 }, uCloud: { value: 0.1 }, uNight: { value: 0 }, uTime: { value: 0 },
-      uGround: { value: new THREE.Color(0x5a5446) }, uCloudTint: { value: new THREE.Color(1, 1, 1) }, uMoonDir: { value: new THREE.Vector3(-0.4, 0.75, -0.5).normalize() },
+      uGround: { value: new THREE.Color(0x5a5446) }, uCloudTint: { value: new THREE.Color(1, 1, 1) }, uMoonDir: { value: new THREE.Vector3(-0.4, 0.75, -0.5).normalize() }, uYaw: { value: 0 },
     }]),
     vertexShader: S.vertexShader,
     fragmentShader: frag,
@@ -90,48 +93,7 @@ function makeSkyMaterial() {
   });
 }
 
-// Ground: flat around the camp, rolling gently further out (value noise, metres).
-function h2(x, z) {
-  const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
-  return s - Math.floor(s);
-}
-function vnoise2(x, z) {
-  const ix = Math.floor(x), iz = Math.floor(z), fx = x - ix, fz = z - iz;
-  const ux = fx * fx * (3 - 2 * fx), uz = fz * fz * (3 - 2 * fz);
-  const a = h2(ix, iz), b = h2(ix + 1, iz), c = h2(ix, iz + 1), d = h2(ix + 1, iz + 1);
-  return a + (b - a) * ux + (c - a) * uz + (a - b - c + d) * ux * uz;
-}
-export function groundHeight(x, z) {
-  const r = Math.hypot(x - 1.8, z);
-  const k = THREE.MathUtils.smoothstep(r, 9, 45);
-  if (k <= 0) return 0;
-  const n = vnoise2(x * 0.035, z * 0.035) * 0.65 + vnoise2(x * 0.09 + 7, z * 0.09 - 3) * 0.35;
-  return k * (n - 0.35) * 2.6;
-}
-function groundGeometry() {
-  const rings = [];
-  for (let r = 0; r < 160; r += r < 12 ? 1.5 : r < 50 ? 3 : 8) rings.push(r);
-  rings.push(160);
-  const segA = 128, pos = [], uv = [], idx = [];
-  for (let j = 0; j < rings.length; j++) {
-    for (let i = 0; i <= segA; i++) {
-      const a = (i / segA) * Math.PI * 2, r = rings[j];
-      const x = Math.cos(a) * r, z = Math.sin(a) * r;
-      pos.push(x, groundHeight(x, z), z);
-      uv.push(x / 320 + 0.5, -z / 320 + 0.5);
-      if (j < rings.length - 1 && i < segA) {
-        const p = j * (segA + 1) + i;
-        idx.push(p, p + 1, p + segA + 1, p + 1, p + segA + 2, p + segA + 1);
-      }
-    }
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  return g;
-}
+const MOON_WORLD = new THREE.Vector3(-0.4, 0.75, -0.5).normalize();
 
 export function createStage(container, { quality = autoQuality() } = {}) {
   const Q = QUALITY[quality] || QUALITY.high;
@@ -208,21 +170,6 @@ export function createStage(container, { quality = autoQuality() } = {}) {
 
   // ── Ground ───────────────────────────────────────────────
   const groundMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, envMapIntensity: 0.6 });
-  // Break up texture tiling: blend a rotated macro-scale sample and a slow brightness variation
-  groundMat.onBeforeCompile = (shader) => {
-    shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `
-      #ifdef USE_MAP
-        vec4 sampledDiffuseColor = texture2D( map, vMapUv );
-        vec2 ruv = mat2(0.8, -0.6, 0.6, 0.8) * vMapUv * 0.27 + vec2(0.37, 0.71);
-        vec4 macro = texture2D( map, ruv );
-        float vary = texture2D( map, vMapUv * 0.043 + vec2(0.5) ).g;
-        sampledDiffuseColor.rgb = mix(sampledDiffuseColor.rgb, macro.rgb, 0.4) * (0.82 + 0.36 * vary);
-        diffuseColor *= sampledDiffuseColor;
-      #endif`);
-  };
-  const ground = new THREE.Mesh(groundGeometry(), groundMat);
-  ground.receiveShadow = true;
-  scene.add(ground);
   const grounds = {};
   const setGround = (id) => {
     if (!grounds[id]) grounds[id] = loadPBR(id, { repeat: 42, normalScale: 0.9 });
@@ -236,14 +183,14 @@ export function createStage(container, { quality = autoQuality() } = {}) {
   // Soft contact shadow under the van (ambient occlusion of the body on the ground)
   const cs = document.createElement('canvas');
   cs.width = 256;
-  cs.height = 128;
+  cs.height = 256; // square gradient, stretched by the plane into a soft ellipse
   const cg = cs.getContext('2d');
-  const grd = cg.createRadialGradient(128, 64, 8, 128, 64, 128);
+  const grd = cg.createRadialGradient(128, 128, 8, 128, 128, 128);
   grd.addColorStop(0, 'rgba(0,0,0,0.75)');
   grd.addColorStop(0.55, 'rgba(0,0,0,0.42)');
   grd.addColorStop(1, 'rgba(0,0,0,0)');
   cg.fillStyle = grd;
-  cg.fillRect(0, 0, 256, 128);
+  cg.fillRect(0, 0, 256, 256);
   const contact = new THREE.Mesh(new THREE.PlaneGeometry(8.4, 3.4), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cs), transparent: true, depthWrite: false, toneMapped: false }));
   contact.rotation.x = -Math.PI / 2;
   contact.position.set(1.85, 0.004, 0);
@@ -293,8 +240,24 @@ export function createStage(container, { quality = autoQuality() } = {}) {
   composer.addPass(outputPass);
 
   const stage = {
-    quality, Q, renderer, labels, scene, camera, controls, hemi, sun, interior, bathLight, sky, skyMat, ground, groundMat, setGround,
+    quality, Q, renderer, labels, scene, camera, controls, hemi, sun, interior, bathLight, sky, skyMat, groundMat, setGround,
+    yaw: 0, envYaw: 0, sunWorld: new THREE.Vector3(0, 1, 0), sunScene: new THREE.Vector3(0, 1, 0), night: false,
     contact, rain, snow, fog: scene.fog, composer, aoPass: null, bloomPass: null, refreshEnv, envDirty: true, envT: 0,
+    /** Floating origin: the world is turned by −yaw around the van, so turn the sun, moon and sky too. */
+    setYaw(yaw) {
+      stage.yaw = yaw;
+      const Y = new THREE.Vector3(0, 1, 0);
+      stage.sunScene.copy(stage.sunWorld).applyAxisAngle(Y, -yaw);
+      const moon = MOON_WORLD.clone().applyAxisAngle(Y, -yaw);
+      skyMat.uniforms.sunPosition.value.copy(stage.sunScene).multiplyScalar(400);
+      skyMat.uniforms.uMoonDir.value.copy(moon);
+      skyMat.uniforms.uYaw.value = yaw;
+      sun.position.copy(stage.night ? moon : stage.sunScene).multiplyScalar(22).add(sun.target.position);
+      if (Math.abs(yaw - stage.envYaw) > 0.3) {
+        stage.envYaw = yaw;
+        stage.envDirty = true;
+      }
+    },
     /** Switch quality tier live: resolution, shadows, AO, bloom and cabin lights. */
     setQuality(tier) {
       const q = QUALITY[tier] || QUALITY.high;
@@ -387,7 +350,6 @@ export function applyWeather(stage, scn, wx, hour) {
   const dayK = THREE.MathUtils.clamp((elev + 0.08) / 0.35, 0, 1);
   const cloud = wx.cloud ?? 0;
   const u = stage.skyMat.uniforms;
-  u.sunPosition.value.copy(dir).multiplyScalar(400);
   u.turbidity.value = 2.5 + 6 * (v.haze ?? 0) + (wx.rain ? 6 : 0);
   u.rayleigh.value = night ? 0.4 : 1.2 + 1.5 * (1 - dayK);
   u.mieCoefficient.value = 0.004 + 0.01 * (v.haze ?? 0);
@@ -405,8 +367,9 @@ export function applyWeather(stage, scn, wx, hour) {
   stage.groundMat.roughness = wx.rain ? 0.32 : v.snowGround ? 0.8 : 0.95;
   stage.groundMat.envMapIntensity = wx.rain ? 1.4 : v.snowGround ? 1.6 : 0.5;
   // Sun / moon light
-  const moonDir = new THREE.Vector3(-0.4, 0.75, -0.5).normalize();
-  stage.sun.position.copy(night ? moonDir : dir).multiplyScalar(22).add(stage.sun.target.position);
+  stage.sunWorld.copy(dir);
+  stage.night = night;
+  stage.setYaw(stage.yaw);
   const lowSun = THREE.MathUtils.clamp(Math.sin(Math.max(elev, 0)) * 2.2, 0, 1);
   stage.sun.intensity = night ? 0.42 : (0.3 + 2.4 * lowSun) * (1 - 0.8 * cloud) * (0.5 + 0.5 * (v.sun ?? 1));
   stage.sun.color.setHSL(night ? 0.6 : 0.08 - 0.02 * lowSun, night ? 0.35 : 0.9 - 0.75 * lowSun, night ? 0.75 : 0.62 + 0.3 * lowSun);

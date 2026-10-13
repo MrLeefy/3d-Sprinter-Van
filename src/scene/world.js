@@ -1,12 +1,13 @@
 // Assembles the complete 3D world and drives per-frame visual updates.
 import * as THREE from 'three';
-import { createStage, applyWeather, animatePrecip, sunDirection } from './setup.js';
+import { createStage, applyWeather, animatePrecip } from './setup.js';
 import { makeMaterials, applyMetricUVs } from './materials.js';
 import { setDRL } from './bodyShell.js';
 import { Infrared } from './infrared.js';
 import { Walker } from './walk.js';
 import { addProps } from './props.js';
-import { Surroundings } from './surroundings.js';
+import { Terrain } from './terrain.js';
+import { Driver } from './drive.js';
 import { buildBody } from './vanBody.js';
 import { buildComponents } from './interior.js';
 import { buildSystems, Flows } from './systems.js';
@@ -48,13 +49,20 @@ export class World {
     this.flows.addSet('electrical', this.systems.routes.filter((r) => r.sys === 'electrical'), { radius: 0.013, spacing: 0.28 });
     this.flows.addSet('ducts', this.systems.routes.filter((r) => r.sys === 'air'), { radius: 0.024, spacing: 0.45, soft: 0.6 });
     this.flows.addSet('air', this.systems.air, { radius: 0.03, spacing: 0.5, soft: 1 });
-    this.surroundings = new Surroundings(scene);
     this.viz = new Viz(scene);
     this.person = new Person();
     scene.add(this.person.root);
     addProps(this);
     applyMetricUVs(scene);
     this.modes = new Modes(this.stage, this.M, this.body, this.comps, this.systems, this.viz, this.person);
+    // Floating origin: everything that belongs to the van rides in vanRoot (pitch/roll on terrain);
+    // the terrain moves and turns around it.
+    this.vanRoot = new THREE.Group();
+    this.vanRoot.name = 'van';
+    scene.add(this.vanRoot);
+    for (const o of [this.body.root, this.comps.root, this.systems.root, this.flows.group, this.viz.thermal, this.viz.mech, this.viz.airLabels, this.person.root, this.modes.selBox, this.stage.contact]) this.vanRoot.add(o);
+    this.terrain = new Terrain(this.stage);
+    this.driver = new Driver(this);
     this.ir = new Infrared(this);
     this.modes.infrared = this.ir;
     this.walker = new Walker(this);
@@ -83,7 +91,7 @@ export class World {
   flyTo(name, dur = 1.2) {
     const c = typeof name === 'object' ? name : CAMERAS[name];
     if (!c) return;
-    if (this.walker?.on) return;
+    if (this.walker?.on || this.driver?.active) return;
     const cam = this.stage.camera, ctl = this.stage.controls;
     const t1 = new THREE.Vector3(...c.t);
     const p1 = new THREE.Vector3(...c.p);
@@ -134,8 +142,8 @@ export class World {
 
   weather(scn, wx, hour) {
     applyWeather(this.stage, scn, wx, hour);
-    this.sunDir.copy(sunDirection(scn, wx, hour));
-    this.surroundings.setScenario(scn.id, wx);
+    this.terrain.setScenario(scn.id, wx);
+    this.sunDir.copy(this.stage.sunScene);
     if (this.ir.on) this.ir.setStage(true);
   }
 
@@ -195,7 +203,9 @@ export class World {
       this.uaCache = envelopeUA({ covers: snap.covers, podOut: snap.podOut });
       this.viz.updateThermal(dt, snap, this.uaCache, this.sunDir);
     }
-    this.surroundings.update(dt);
+    this.terrain.tick(dt);
+    this.driver.update(dt);
+    this.sunDir.copy(this.stage.sunScene);
     // Camp light under the awning after dark
     if (reg.awningLight) {
       const nightK = THREE.MathUtils.clamp((0.12 - this.sunDir.y) / 0.25, 0, 1);
@@ -207,7 +217,7 @@ export class World {
     else this.person.root.visible = false;
     this.modes.tick(dt);
     if (this.walker.on) this.walker.update(dt);
-    else this.stage.controls.update();
+    else if (!this.driver.active || this.driver.camMode === 'orbit') this.stage.controls.update();
     this.stage.render();
   }
 

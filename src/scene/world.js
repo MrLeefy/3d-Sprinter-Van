@@ -7,6 +7,7 @@ import { Infrared } from './infrared.js';
 import { Walker } from './walk.js';
 import { addProps } from './props.js';
 import { Land } from './land.js';
+import { Effects } from './effects.js';
 import { World as GenWorld } from '../world/gen.js';
 import { Driver } from './drive.js';
 import { buildBody } from './vanBody.js';
@@ -66,6 +67,7 @@ export class World {
     this.terrain = new Land(this.stage, this.gen);
     this.land = this.terrain;
     this.driver = new Driver(this);
+    this.fx = new Effects(this);
     this.ir = new Infrared(this);
     this.modes.infrared = this.ir;
     this.walker = new Walker(this);
@@ -208,10 +210,12 @@ export class World {
     }
     this.terrain.tick(dt);
     this.driver.update(dt);
+    this.fx.update(dt, this.driver);
     this.sunDir.copy(this.stage.sunScene);
+    const nightK = THREE.MathUtils.clamp((0.12 - this.sunDir.y) / 0.25, 0, 1);
+    this.terrain.season.u.uNight.value = nightK; // town windows, signs and street lamps light up
     // Camp light under the awning after dark
     if (reg.awningLight) {
-      const nightK = THREE.MathUtils.clamp((0.12 - this.sunDir.y) / 0.25, 0, 1);
       reg.awningLight.intensity = (values.awning ?? 0) * lightFactor * nightK * 9;
     }
     this.ir.update(snap, this.sunDir);

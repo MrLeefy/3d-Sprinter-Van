@@ -26,7 +26,7 @@ class Layout {
   tile(tx, tz) {
     const k = tileKey(tx, tz);
     let t = this.tiles.get(k);
-    if (!t) this.tiles.set(k, (t = { lots: [], streets: [], blocks: [], lamps: [], trees: [], cars: [], misc: [] }));
+    if (!t) this.tiles.set(k, (t = { lots: [], streets: [], blocks: [], lamps: [], trees: [], cars: [], misc: [], signs: [] }));
     return t;
   }
 
@@ -512,7 +512,9 @@ export function layoutOf(world, n) {
     if (!ex[idx] || n.kind === 'junction' || n.kind === 'farm' || n.kind === 'lodge' || n.kind === 'camp') return;
     const out = [ox, oz], right = [oz, -ox];
     const off = 46;
-    L.signs.push({ kind: 'welcome', port: nm, x: p[0] + out[0] * off + right[0] * 9.5, z: p[1] + out[1] * off + right[1] * 9.5, yaw: Math.atan2(ox, oz), text: n.name });
+    const sx = p[0] + out[0] * off + right[0] * 9.5, sz = p[1] + out[1] * off + right[1] * 9.5;
+    L.reg('signs', L.signs.length, sx - 2, sx + 2, sz - 2, sz + 2);
+    L.signs.push({ kind: 'welcome', port: nm, x: sx, z: sz, yaw: Math.atan2(ox, oz), text: n.name });
   });
   n._layout = L;
   return L;

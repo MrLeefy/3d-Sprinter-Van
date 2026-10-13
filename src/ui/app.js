@@ -16,7 +16,7 @@ import { QUALITY, TIERS, autoQuality } from '../scene/setup.js';
 import { IR_RANGE, IRONBOW_CSS } from '../scene/infrared.js';
 import { TOUR } from './tour.js';
 import { EngineSound } from '../scene/audio.js';
-import { drawWorldMap } from './mapview.js';
+import { DriveUI } from './driveui.js';
 
 const SIM_MODES = [
   ['none', 'Off', '#8d9aab'], ['thermal', 'Thermal', '#ef6c3a'], ['electrical', 'Electrical', '#f2c418'], ['water', 'Water', '#3b8ff0'],
@@ -179,62 +179,7 @@ export class App {
       for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => (pad[axis] = 0));
     }
     $('#driveBtn').addEventListener('click', () => (this.drivingMode ? this.exitDrive() : this.enterDrive()));
-    $('#dhExit').addEventListener('click', () => this.exitDrive());
-    $('#dhHome').addEventListener('click', () => {
-      this.world.driver.home();
-      this.toast('Back at the camp clearing.');
-    });
-    $('#dhCam').addEventListener('click', () => ($('#dhCam').textContent = `Camera · ${this.world.driver.cycleCamera()}`));
-    $('#dhLights').addEventListener('click', () => ($('#dhLights').textContent = `Lights · ${this.world.driver.cycleLights()}`));
-    $('#dhSound').addEventListener('click', () => {
-      const on = !this.sound.on;
-      this.sound.setOn(on);
-      $('#dhSound').textContent = on ? 'Sound on' : 'Sound off';
-      $('#dhSound').setAttribute('aria-pressed', String(on));
-      try {
-        localStorage.setItem('sprinter-sound', on ? '1' : '0');
-      } catch {
-        /* per-visit only */
-      }
-    });
-    {
-      const pad = this.world.driver.pad;
-      const hold = (el, key) => {
-        el.addEventListener('pointerdown', (e) => {
-          e.preventDefault();
-          el.setPointerCapture?.(e.pointerId);
-          pad[key] = 1;
-          el.classList.add('down');
-        });
-        for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(ev, () => {
-          pad[key] = 0;
-          el.classList.remove('down');
-        });
-      };
-      hold($('#dhGas'), 'throttle');
-      hold($('#dhBrake'), 'brake');
-      const st = $('#dhSteer'), wheel = $('#dhWheel');
-      let x0 = null;
-      st.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        st.setPointerCapture?.(e.pointerId);
-        x0 = e.clientX;
-      });
-      st.addEventListener('pointermove', (e) => {
-        if (x0 === null) return;
-        pad.steer = Math.max(-1, Math.min(1, -(e.clientX - x0) / 70));
-        wheel.style.transform = `rotate(${-pad.steer * 120}deg)`;
-      });
-      for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) st.addEventListener(ev, () => {
-        x0 = null;
-        pad.steer = 0;
-        wheel.style.transform = '';
-      });
-    }
-    this.world.driver.onEvent = (kind) => {
-      const msg = { tree: 'Bump — you hit a tree. Back up and steer around it.', boulder: 'Bump — boulder. Find another line.', deep: 'Too deep to ford: the van stops before the water reaches the sills (≈ 0.6 m).', slide: 'Sliding — not enough grip for that speed on this surface.', stuck: 'Wheelspin — this rear-wheel-drive van cannot climb that slope on this surface. Back down and take the track.' }[kind];
-      if (msg) this.toast(msg);
-    };
+    this.driveUI = new DriveUI(this);
     $('#tourBtn').addEventListener('click', () => (this.tour ? this.stopTour() : this.startTour()));
     $('#tcClose').addEventListener('click', () => this.stopTour());
     $('#tcPrev').addEventListener('click', () => this.tourGo(this.tour.i - 1));
@@ -248,7 +193,7 @@ export class App {
       if ((e.key === 'h' || e.key === 'H') && !e.target.closest?.('input, select, textarea') && !this.world.walker.on) this.setPhoto(!this.photo);
       if (e.key !== 'Escape') return;
       if (this.photo) return this.setPhoto(false);
-      if (this.drivingMode) return this.exitDrive();
+      if (this.drivingMode) return this.driveUI.escape() || this.exitDrive();
       if (this.world.walker.on) this.exitWalk();
       else if (this.tour) this.stopTour();
     });
@@ -895,24 +840,16 @@ export class App {
     this.$('#speed').value = '0.0166667';
     this.setClock(true);
     this.root.classList.add('driving');
-    this.$('#driveHud').hidden = false;
+    this.driveUI.show();
     this.$('#driveBtn').setAttribute('aria-pressed', 'true');
     this.$('#driveBtn').textContent = 'Park';
     this.world.stage.fullView = true;
     this.world.stage.onResize();
     this.world.driver.enter();
-    this.$('#dhCam').textContent = `Camera · ${this.world.driver.camLabel()}`;
-    let soundOn = true;
-    try {
-      soundOn = localStorage.getItem('sprinter-sound') !== '0';
-    } catch {
-      soundOn = true;
-    }
     this.sound ||= new EngineSound();
-    this.sound.setOn(soundOn);
-    this.$('#dhSound').textContent = soundOn ? 'Sound on' : 'Sound off';
+    this.sound.volume = this.driveUI.s.volume;
+    this.sound.setOn(this.driveUI.s.sound);
     this.sound.start();
-    this.mapT = 0;
   }
 
   exitDrive() {
@@ -921,7 +858,7 @@ export class App {
     this.drivingMode = false;
     this.sound?.update(760, 0, 0, 0, false);
     this.root.classList.remove('driving');
-    this.$('#driveHud').hidden = true;
+    this.driveUI.hide();
     this.$('#driveBtn').setAttribute('aria-pressed', 'false');
     this.$('#driveBtn').textContent = 'Drive';
     this.world.stage.fullView = !!this.photo;
@@ -940,46 +877,7 @@ export class App {
   }
 
   driveTick(dt) {
-    const D = this.world.driver;
-    const stowing = this.master > 0.002 || Object.keys(this.overrides).length > 0;
-    D.ready = !stowing;
-    const st = this.$('#dhStatus');
-    st.hidden = !stowing;
-    if (stowing) st.textContent = `Stowing for travel — awning, pod, doors, table and seats lock before the van can move (${Math.round(this.master * 100)} %)`;
-    const kmh = Math.abs(D.v) * 3.6;
-    this.$('#dhSpeed').textContent = String(Math.round(kmh));
-    this.$('#dhMph').textContent = `${Math.round(kmh * 0.6214)} mph`;
-    this.$('#dhGear').textContent = D.gear();
-    const thr = Math.max(0, D.lastInput?.throttle || 0);
-    const rpm = D.rpm(thr);
-    this.$('#dhRpm').style.width = `${Math.min(100, (rpm / 4200) * 100)}%`;
-    this.$('#dhRpmT').textContent = `${Math.round(rpm / 10) * 10} rpm`;
-    this.sound?.update(rpm, thr, Math.abs(D.v), D.surface.kind === 'road' || D.surface.kind === 'street' ? 0 : 1, true);
-    this.mapT -= dt;
-    if (this.mapT <= 0) {
-      this.mapT = 0.25;
-      const s = this.snap;
-      const fuelPct = (s && this.simState.fuelL / VAN.fuelTank.v) || 0;
-      this.$('#dhFuel').style.width = `${Math.round(fuelPct * 100)}%`;
-      this.$('#dhFuelT').textContent = `${this.simState.fuelL.toFixed(0)} L`;
-      this.$('#dhBat').style.width = `${Math.round((s?.soc ?? 0) * 100)}%`;
-      this.$('#dhBatT').textContent = `${Math.round((s?.soc ?? 0) * 100)} %${s?.altW > 0 ? ` · +${Math.round(s.altW)} W` : ''}`;
-      this.$('#dhSurface').textContent = D.surface.label;
-      this.$('#dhSlope').textContent = `${((D.slope * 180) / Math.PI).toFixed(1)}° slope`;
-      this.$('#dhOdo').textContent = `${(D.trip / 1000).toFixed(2)} km`;
-      this.drawMap();
-    }
-  }
-
-  /** North-up minimap (960 m across): lakes, towns, roads, your trail, camp and the van. */
-  drawMap() {
-    const cv = this.$('#dhMap');
-    const g = cv.getContext('2d');
-    const D = this.world.driver, W = this.world.gen;
-    drawWorldMap(g, W, {
-      w: cv.width, h: cv.height, cx: D.x, cz: D.z, mpp: 4, van: { x: D.x, z: D.z, yaw: D.yaw }, trail: D.trail, home: W.home,
-      frozen: this.world.terrain.season.u.uIce.value > 0.5, accent: getComputedStyle(this.root).getPropertyValue('--accent') || '#ff8a3d',
-    });
+    this.driveUI.tick(dt);
   }
 
   // ── First-person walk ───────────────────────────────────
@@ -1085,6 +983,10 @@ export class App {
     box.innerHTML = `<div class="subhead">${esc(SIM_MODES.find((m) => m[0] === s)[1])} mode</div><div class="legend">${items.map(([c, t]) => `<span><i style="background:${c}"></i>${esc(t)}</span>`).join('')}</div><p class="note" style="margin-top:4px">${esc(LEGEND_NOTE[s])}</p>`;
   }
 
+  get fuelCap() {
+    return VAN.fuelTank.v;
+  }
+
   toast(msg) {
     const t = document.createElement('div');
     t.className = 'toast';
@@ -1142,24 +1044,7 @@ function layoutHTML() {
   <div class="walkhud" id="walkHud" hidden><div class="wh-txt"><b>First person</b> · drag to look · W A S D or arrows to walk · Q / E turn · click anything to inspect</div>
     <div class="wh-pad"><button data-pad="t1" aria-label="Turn left">⟲</button><button data-pad="f1" aria-label="Forward">▲</button><button data-pad="t-1" aria-label="Turn right">⟳</button><button data-pad="s-1" aria-label="Step left">◀</button><button data-pad="f-1" aria-label="Back">▼</button><button data-pad="s1" aria-label="Step right">▶</button></div>
     <button class="btn" id="walkExit">Exit · Esc</button></div>
-  <div class="drivehud" id="driveHud" hidden>
-    <canvas class="dh-map" id="dhMap" width="240" height="240" aria-label="Map around the van: track, water, forest, your trail and the camp"></canvas>
-    <div class="dh-top"><button class="dh-btn" id="dhCam" title="C">Camera · Chase</button><button class="dh-btn" id="dhLights" title="L">Lights · auto</button><button class="dh-btn" id="dhSound" aria-pressed="true">Sound on</button><button class="dh-btn" id="dhHome">Back to camp</button><button class="dh-btn primary" id="dhExit">Park · Esc</button></div>
-    <div class="dh-status" id="dhStatus" hidden></div>
-    <div class="dh-cluster">
-      <div class="dh-speed"><b id="dhSpeed">0</b><span>km/h</span><small id="dhMph">0 mph</small></div>
-      <div class="dh-gear" id="dhGear">P</div>
-      <div class="dh-meters">
-        <div class="dh-m"><span>Fuel</span><i class="bar"><i id="dhFuel"></i></i><em id="dhFuelT"></em></div>
-        <div class="dh-m"><span>House battery</span><i class="bar"><i id="dhBat"></i></i><em id="dhBatT"></em></div>
-        <div class="dh-m"><span>Engine</span><i class="bar"><i id="dhRpm"></i></i><em id="dhRpmT"></em></div>
-      </div>
-      <div class="dh-info"><span id="dhSurface">Track</span><span id="dhSlope">0°</span><span id="dhOdo">0.00 km</span></div>
-    </div>
-    <div class="dh-steer" id="dhSteer" aria-label="Steering: drag left or right"><div class="dh-wheel" id="dhWheel"></div></div>
-    <div class="dh-pedals"><button id="dhBrake" aria-label="Brake, hold to reverse">Brake<small>hold: reverse</small></button><button id="dhGas" aria-label="Accelerate">Drive</button></div>
-    <p class="dh-hint">W / ↑ drive · S / ↓ brake, hold to reverse · A D steer · Space handbrake · C camera · L lights</p>
-  </div>
+  <div class="drivehud" id="driveHud" hidden></div>
   <div class="toasts" id="toasts" aria-live="polite"></div>
   <div class="tip" id="tip" hidden></div>
   <div class="mobile-toggles"><button id="mLeft">Controls</button><button id="mRight">Data</button></div>`;

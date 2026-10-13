@@ -5,6 +5,7 @@ export class EngineSound {
   constructor() {
     this.ctx = null;
     this.on = true;
+    this.volume = 1;
   }
 
   start() {
@@ -68,10 +69,41 @@ export class EngineSound {
     this.gTyre = ctx.createGain();
     this.gTyre.gain.value = 0;
     noise().connect(tyre).connect(this.gTyre).connect(this.master);
+    // tyre squeal on a slide or a locked-up stop
+    const squeal = ctx.createBiquadFilter();
+    squeal.type = 'bandpass';
+    squeal.frequency.value = 1900;
+    squeal.Q.value = 5;
+    this.gSqueal = ctx.createGain();
+    this.gSqueal.gain.value = 0;
+    noise().connect(squeal).connect(this.gSqueal).connect(this.master);
   }
 
-  /** rpm, throttle 0..1, speed m/s, offroad 0..1, active (engine running) */
-  update(rpm, throttle, speed, offroad, active) {
+  /** Two-tone horn. */
+  horn() {
+    if (!this.ctx || !this.on) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.22 * this.volume, t + 0.03);
+    g.gain.setValueAtTime(0.22 * this.volume, t + 0.38);
+    g.gain.linearRampToValueAtTime(0, t + 0.5);
+    g.connect(ctx.destination);
+    for (const f of [392, 311]) {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = f;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 1500;
+      o.connect(lp).connect(g);
+      o.start(t);
+      o.stop(t + 0.52);
+    }
+  }
+
+  /** rpm, throttle 0..1, speed m/s, offroad 0..1, active (engine running), slip 0..1 (tyre squeal) */
+  update(rpm, throttle, speed, offroad, active, slip = 0) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime, k = 0.08;
     const f = (rpm / 60) * 2;
@@ -81,7 +113,8 @@ export class EngineSound {
     this.gClat.gain.setTargetAtTime(0.012 + throttle * 0.03, t, k);
     this.gWind.gain.setTargetAtTime(Math.min(0.22, speed * speed * 0.00018), t, 0.2);
     this.gTyre.gain.setTargetAtTime(Math.min(0.12, offroad * speed * 0.012), t, 0.15);
-    this.master.gain.setTargetAtTime(active && this.on ? 0.5 : 0, t, 0.25);
+    this.gSqueal.gain.setTargetAtTime(Math.min(0.07, slip * Math.min(1, speed / 12) * 0.07), t, 0.08);
+    this.master.gain.setTargetAtTime(active && this.on ? 0.5 * this.volume : 0, t, 0.25);
   }
 
   setOn(on) {

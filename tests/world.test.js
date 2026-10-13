@@ -191,3 +191,22 @@ test('layouts: main street spans the ports and services exist in towns', () => {
   }
   assert.ok(fuel > 15 && camps > 6, `fuel ${fuel} camps ${camps}`);
 });
+
+test('highways and interstates have gentle, drivable curves', () => {
+  W.buildEdgesFor(-3000, -3000, 3000, 3000);
+  const radii = { highway: [], interstate: [] };
+  for (const e of W.edges.values()) {
+    if (!radii[e.cls]) continue;
+    for (let k = 8; k < e.n - 8; k += 2) {
+      const ax = e.xs[k - 6], az = e.zs[k - 6], bx = e.xs[k], bz = e.zs[k], cx = e.xs[k + 6], cz = e.zs[k + 6];
+      const a = Math.hypot(bx - cx, bz - cz), b = Math.hypot(ax - cx, az - cz), c = Math.hypot(ax - bx, az - bz);
+      const area = Math.abs((bx - ax) * (cz - az) - (bz - az) * (cx - ax)) / 2;
+      radii[e.cls].push(area < 1e-6 ? 1e9 : (a * b * c) / (4 * area));
+    }
+  }
+  for (const [cls, r] of Object.entries(radii)) {
+    if (r.length < 50) continue;
+    r.sort((p, q) => p - q);
+    assert.ok(r[Math.floor(r.length * 0.05)] > 200, `${cls} 5th-percentile radius ${r[Math.floor(r.length * 0.05)].toFixed(0)} m`);
+  }
+});

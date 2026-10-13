@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { SeasonState, SEASONS, SCENARIO_SEASON, SCENARIO_WET } from './season.js';
 import { makeTerrainMaterial, makeRoadMaterial, makeWaterMaterial, RC } from './landMaterials.js';
 import * as VEG from './vegetation.js';
+import { Towns } from './towns.js';
 import { prng, hash2, smoothstep } from '../world/noise.js';
 import { ROAD } from '../world/gen.js';
 
@@ -118,7 +119,6 @@ export class Land {
     this.fcenter = null;
     this.colliders = [];
     this.rects = [];
-    this.towns = null;
     this.view = { x: 0, z: 0, h: 0, yaw: 0 };
     // vegetation
     this.vm = VEG.makeVegMaterials(this.season);
@@ -142,6 +142,7 @@ export class Land {
     this.boulders = inst(VEG.rock(8), this.vm.rock, 260, true);
     this.bales = inst(VEG.bale(), this.vm.bale, 700);
     this.season.listeners.push(() => this.onSeason());
+    this.towns = new Towns(this, world, stage);
     this.applySeason();
     this.scatterDirty = false;
     this.pendingEdges = 0;
@@ -292,8 +293,10 @@ export class Land {
   preload(x, z) {
     this.update(x, z, true);
     this.budgetOverride = Infinity;
+    if (this.towns) this.towns.budgetOverride = Infinity;
     this.update(x, z);
     this.budgetOverride = null;
+    if (this.towns) this.towns.budgetOverride = null;
   }
 
   // ── Terrain chunks ─────────────────────────────────────────────────────────
@@ -494,7 +497,7 @@ export class Land {
     out.grass = null; // generated lazily for the chunks right around the van
     place(out.rocks, 40, 3, (b, r) => b.rock + 0.08 > r());
     place(out.boulders, 4, 5, (b, r) => 0.1 + b.rock * 0.7 > r());
-    place(out.bales, 10, 6, (b, r) => b.field > 0.5 && r() < 0.5);
+    place(out.bales, 8, 6, (b, r) => b.field > 0.5 && r() < 0.35);
     return out;
   }
 
@@ -554,7 +557,7 @@ export class Land {
     fill(this.shrubs, 'shrubs', 2, { vary: 0.35, mul: Q.veg });
     fill(this.rocks, 'rocks', 2, { sink: 0.25, vary: 0.3, mul: Q.veg });
     fill(this.boulders, 'boulders', nr, { sink: 0.3, vary: 0.25, mul: 1 });
-    fill(this.bales, 'bales', 2, { mul: 1, lie: true });
+    fill(this.bales, 'bales', 2, { mul: 1, lie: true, scale: 0.55 });
     this.colliders = [];
     for (const c of this.near.values()) {
       if (Math.max(Math.abs(c.cx - cx), Math.abs(c.cz - cz)) > 1) continue;

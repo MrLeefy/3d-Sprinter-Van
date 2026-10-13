@@ -283,56 +283,119 @@ h2.title { margin: 0; font-family: var(--f-display); font-weight: 600; font-size
 .drivebtn { font-family: var(--f-display); letter-spacing: .05em; text-transform: uppercase; font-size: 13px; padding: 0 12px; flex: none; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
 .drivebtn[aria-pressed='true'] { background: var(--raise); color: var(--fg); border-color: var(--line); }
 #app.driving .panel, #app.driving .rail, #app.driving .legendbox, #app.driving .mobile-toggles, #app.driving .tourcard, #app.driving .walkhud, #app.driving .caption, #app.driving .irscale { display: none !important; }
-.drivehud { position: absolute; inset: calc(var(--top) + env(safe-area-inset-top, 0px)) 0 0 0; z-index: 12; pointer-events: none; user-select: none; -webkit-user-select: none; }
+.drivehud { position: absolute; inset: calc(var(--top) + env(safe-area-inset-top, 0px)) 0 0 0; z-index: 12; pointer-events: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .drivehud > * { pointer-events: auto; }
-.dh-map { position: absolute; left: 14px; top: 12px; width: 120px; height: 120px; border-radius: 50%; box-shadow: var(--shadow); border: 1px solid var(--line); }
-.dh-top { position: absolute; right: 14px; top: 12px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: min(560px, calc(100% - 160px)); }
-.dh-btn { border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; cursor: pointer; backdrop-filter: blur(10px); }
+.dh-map { position: absolute; left: 14px; top: 12px; width: 132px; height: 132px; border-radius: 50%; box-shadow: var(--shadow); border: 2px solid var(--line); cursor: pointer; }
+.dh-slot { position: absolute; left: 14px; top: 156px; width: min(272px, calc(100% - 28px)); display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.dh-slot > * { pointer-events: auto; }
+.dh-top { position: absolute; right: 14px; top: 12px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: min(560px, calc(100% - 170px)); }
+.dh-btn { border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 8px; padding: 7px 11px; font-size: 12.5px; cursor: pointer; backdrop-filter: blur(10px); }
+.dh-btn:hover { border-color: var(--muted); }
 .dh-btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
-.dh-status { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); max-width: min(520px, calc(100% - 300px)); background: var(--panel-solid); border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 8px; padding: 7px 12px; font-size: 13px; box-shadow: var(--shadow); }
-.dh-cluster { position: absolute; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); display: grid; grid-template-columns: auto auto 1fr; grid-template-areas: 'speed gear meters' 'info info info'; align-items: center; gap: 4px 14px; width: min(460px, calc(100% - 420px)); min-width: 300px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; box-shadow: var(--shadow); backdrop-filter: blur(12px); }
-.dh-speed { grid-area: speed; display: flex; flex-direction: column; align-items: flex-start; line-height: 1; }
-.dh-speed b { font-family: var(--f-display); font-size: 46px; font-weight: 600; font-variant-numeric: tabular-nums; min-width: 2.2ch; }
-.dh-speed span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
-.dh-speed small { font-family: var(--f-data); font-size: 11px; color: var(--muted); margin-top: 2px; }
+.dh-status { position: absolute; left: 50%; top: 56px; transform: translateX(-50%); max-width: min(520px, calc(100% - 300px)); background: var(--panel-solid); border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 8px; padding: 7px 12px; font-size: 13px; box-shadow: var(--shadow); }
+.dh-cluster { position: absolute; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); display: grid; grid-template-columns: auto auto auto 1fr; grid-template-areas: 'speed limit gear badges' 'meters meters meters meters' 'info info info info'; align-items: center; gap: 6px 14px; width: min(540px, calc(100% - 420px)); min-width: 340px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; box-shadow: var(--shadow); backdrop-filter: blur(12px); }
+.dh-speed { grid-area: speed; display: flex; align-items: baseline; gap: 6px; line-height: 1; }
+.dh-speed b { font-family: var(--f-display); font-size: 48px; font-weight: 600; font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; }
+.dh-unit { border: 0; background: transparent; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; cursor: pointer; padding: 2px; }
+.dh-limit { grid-area: limit; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 44px; padding: 3px 2px 2px; border: 2px solid #111; border-radius: 5px; background: #fafafa; color: #111; line-height: 1; }
+.dh-limit i { font-style: normal; font-size: 7.5px; font-weight: 700; letter-spacing: .02em; text-align: center; }
+.dh-limit b { font-family: var(--f-display); font-size: 24px; font-weight: 700; }
+.dh-limit.over { border-color: var(--crit); animation: dhflash .7s steps(2) infinite; }
+.dh-limit.over b { color: var(--crit); }
+@keyframes dhflash { 50% { background: #ffd9d9; } }
 .dh-gear { grid-area: gear; font-family: var(--f-data); font-size: 22px; font-weight: 700; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 8px; border: 1px solid var(--line); color: var(--accent); }
-.dh-meters { grid-area: meters; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.dh-gear.rev { color: var(--crit); border-color: var(--crit); }
+.dh-badges { grid-area: badges; display: flex; gap: 5px; justify-content: flex-end; flex-wrap: wrap; }
+.dh-badges button { border: 1px solid var(--line); background: var(--raise); color: var(--muted); border-radius: 999px; padding: 4px 9px; font-size: 11.5px; cursor: pointer; white-space: nowrap; }
+.dh-badges button[aria-pressed='true'] { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.dh-meters { grid-area: meters; display: flex; flex-direction: column; gap: 5px; min-width: 0; border-top: 1px solid var(--line); padding-top: 7px; }
 .dh-m { display: grid; grid-template-columns: 86px 1fr 92px; align-items: center; gap: 8px; font-size: 11.5px; color: var(--muted); }
 .dh-m .bar { height: 6px; border-radius: 3px; background: var(--grid); overflow: hidden; display: block; }
 .dh-m .bar i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 3px; transition: width .2s; }
 .dh-m em { font-style: normal; font-family: var(--f-data); color: var(--fg); text-align: right; font-size: 11px; white-space: nowrap; }
-.dh-info { grid-area: info; display: flex; gap: 14px; justify-content: center; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 6px; }
+.dh-info { grid-area: info; display: flex; gap: 14px; justify-content: center; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 6px; flex-wrap: wrap; }
 .dh-info span:first-child { color: var(--fg); font-weight: 600; }
-.dh-steer { position: absolute; left: 18px; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); width: 150px; height: 150px; border-radius: 50%; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); touch-action: none; display: grid; place-items: center; backdrop-filter: blur(10px); }
-.dh-wheel { width: 104px; height: 104px; border-radius: 50%; border: 9px solid var(--fg); opacity: .85; position: relative; transition: transform .12s; }
+.dh-steer { position: absolute; left: 0; bottom: 0; width: 46%; height: 54%; touch-action: none; display: flex; align-items: flex-end; justify-content: flex-start; padding: 0 0 calc(18px + env(safe-area-inset-bottom, 0px)) 18px; pointer-events: auto; }
+.drivehud.orbit .dh-steer { pointer-events: none; }
+.dh-wheel { width: 112px; height: 112px; border-radius: 50%; border: 9px solid var(--fg); opacity: .4; position: relative; transition: transform .1s, opacity .2s; pointer-events: none; background: var(--panel); }
+.dh-steer.down .dh-wheel { opacity: .85; transition: opacity .2s; }
 .dh-wheel::before { content: ''; position: absolute; left: 50%; top: 50%; width: 100%; height: 9px; background: var(--fg); transform: translate(-50%, -50%); border-radius: 4px; }
 .dh-wheel::after { content: ''; position: absolute; left: 50%; top: 50%; width: 9px; height: 50%; background: var(--fg); transform: translate(-50%, 0); border-radius: 4px; }
+@media (pointer: fine) { .dh-wheel { display: none; } }
+.dh-aux { position: absolute; right: 18px; bottom: calc(172px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 8px; }
+.dh-aux button { width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--fg); font-size: 20px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; box-shadow: var(--shadow); backdrop-filter: blur(10px); touch-action: none; }
+.dh-aux button small { font-size: 9.5px; color: var(--muted); margin-top: 1px; }
 .dh-pedals { position: absolute; right: 18px; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); display: flex; align-items: flex-end; gap: 10px; }
-.dh-pedals button { touch-action: none; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 14px; font-family: var(--f-display); text-transform: uppercase; letter-spacing: .06em; font-size: 15px; cursor: pointer; box-shadow: var(--shadow); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; backdrop-filter: blur(10px); }
-.dh-pedals button small { font-family: var(--f-body); text-transform: none; letter-spacing: 0; font-size: 10.5px; color: var(--muted); }
-#dhBrake { width: 92px; height: 86px; }
-#dhGas { width: 80px; height: 140px; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+.dh-pedals button { touch-action: none; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 14px; font-family: var(--f-display); text-transform: uppercase; letter-spacing: .06em; font-size: 16px; cursor: pointer; box-shadow: var(--shadow); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; backdrop-filter: blur(10px); }
+.dh-gearbtn { width: 56px; height: 56px; }
+.dh-gearbtn b { font-size: 26px; line-height: 1; font-family: var(--f-data); color: var(--accent); }
+.dh-gearbtn small { font-family: var(--f-body); font-size: 10px; color: var(--muted); }
+.dh-gearbtn.rev b { color: var(--crit); }
+#dhBrake { width: 96px; height: 96px; }
+#dhGas { width: 86px; height: 150px; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; font-size: 18px; }
 .dh-pedals button.down { transform: scale(0.95); filter: brightness(1.15); }
-.dh-hint { position: absolute; left: 50%; bottom: calc(132px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); margin: 0; font-size: 11.5px; color: var(--fg); opacity: .75; white-space: nowrap; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+.dh-hint { position: absolute; left: 50%; bottom: calc(196px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); margin: 0; padding: 4px 10px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); font-size: 11.5px; color: var(--fg); white-space: nowrap; pointer-events: none; transition: opacity 1s; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; }
+.dh-hint.gone { opacity: 0; }
 @media (pointer: coarse) { .dh-hint { display: none; } }
+.dh-sheet { position: absolute; right: 14px; top: 56px; width: min(400px, calc(100% - 28px)); max-height: calc(100% - 80px); overflow: auto; background: var(--panel-solid); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px 14px; box-shadow: var(--shadow); z-index: 4; }
+.dh-sh-top { display: flex; justify-content: space-between; align-items: center; font-family: var(--f-display); text-transform: uppercase; letter-spacing: .06em; font-size: 17px; margin-bottom: 4px; }
+.dh-x { border: 0; background: transparent; color: var(--muted); font-size: 24px; cursor: pointer; line-height: 1; padding: 0 4px; }
+.dh-row { margin: 11px 0; }
+.dh-row > label { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); margin-bottom: 5px; }
+.dh-row em { font-style: normal; color: var(--fg); font-family: var(--f-data); }
+.dh-row input[type='range'] { width: 100%; }
+.dh-seg { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }
+.dh-seg.three { grid-template-columns: repeat(3, 1fr); }
+.dh-seg.four { grid-template-columns: repeat(4, 1fr); }
+.dh-seg.five { grid-template-columns: repeat(5, 1fr); }
+.dh-seg button { border: 1px solid var(--line); background: var(--raise); color: var(--fg); border-radius: 8px; padding: 8px 4px; cursor: pointer; font-size: 12.5px; text-align: center; min-width: 0; }
+.dh-seg button:hover { border-color: var(--muted); }
+.dh-seg button[aria-pressed='true'] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 20%, transparent); font-weight: 600; }
+.dh-note { font-size: 11.5px; color: var(--muted); margin: 6px 0 0; line-height: 1.45; }
+.dh-chk { display: flex !important; align-items: center; gap: 8px; color: var(--fg) !important; font-size: 13px !important; margin: 6px 0 0 !important; }
+.dh-two { display: grid; gap: 4px; }
+.dh-keys { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.dh-keys td { padding: 4px 0; vertical-align: top; }
+.dh-keys td:first-child { width: 42%; white-space: nowrap; }
+.dh-keys kbd { font-family: var(--f-data); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 5px; background: var(--raise); }
 @media (max-width: 900px) {
   :root { --drive-pad: 112px; }
   .topbar { grid-template-columns: minmax(0, 1fr) auto auto auto; grid-template-areas: 'brand clock drive tour' 'scn scn scn scn'; }
   .drivebtn { grid-area: drive; height: 30px; padding: 0 10px; }
-  .dh-map { width: 92px; height: 92px; left: 10px; top: 8px; }
-  .dh-top { right: 10px; top: 8px; max-width: calc(100% - 116px); }
-  .dh-btn { padding: 5px 8px; font-size: 11.5px; }
-  .dh-status { top: 108px; max-width: calc(100% - 24px); font-size: 12px; }
-  .dh-cluster { width: auto; min-width: 0; left: calc(var(--drive-pad) + 22px); right: calc(var(--drive-pad) + 76px); transform: none; grid-template-columns: auto auto; grid-template-areas: 'speed gear' 'meters meters'; padding: 8px 10px; gap: 4px 8px; }
+  .dh-map { width: 96px; height: 96px; left: 10px; top: 8px; }
+  .dh-slot { left: 10px; top: 112px; width: min(260px, calc(100% - 20px)); }
+  .dh-top { right: 10px; top: 8px; max-width: calc(100% - 118px); }
+  .dh-btn { padding: 6px 9px; font-size: 12px; }
+  .dh-status { top: 110px; max-width: calc(100% - 24px); font-size: 12px; }
+  .dh-cluster { width: auto; min-width: 0; left: calc(var(--drive-pad) + 22px); right: calc(var(--drive-pad) + 100px); transform: none; grid-template-columns: auto auto auto; grid-template-areas: 'speed limit gear' 'badges badges badges' 'meters meters meters'; padding: 8px 10px; gap: 4px 8px; }
   .dh-speed b { font-size: 34px; }
   .dh-gear { width: 30px; height: 30px; font-size: 17px; }
+  .dh-limit { width: 38px; }
+  .dh-limit b { font-size: 20px; }
+  .dh-badges { justify-content: flex-start; }
+  .dh-badges button { padding: 3px 7px; font-size: 10.5px; }
+  .dh-badges #dhAssist { display: none; }
   .dh-m { grid-template-columns: 1fr; gap: 2px; }
   .dh-m span, .dh-m em { display: none; }
+  .dh-meters { gap: 3px; padding-top: 5px; }
   .dh-info { display: none; }
-  .dh-steer { width: var(--drive-pad); height: var(--drive-pad); left: 10px; }
-  .dh-wheel { width: 76px; height: 76px; border-width: 7px; }
+  .dh-wheel { width: 84px; height: 84px; border-width: 7px; }
+  .dh-steer { padding-left: 12px; }
   .dh-pedals { right: 10px; gap: 6px; }
-  #dhBrake { width: 62px; height: 70px; font-size: 12px; }
-  #dhBrake small { display: none; }
-  #dhGas { width: 62px; height: 116px; font-size: 13px; }
+  .dh-gearbtn { width: 46px; height: 46px; }
+  .dh-gearbtn b { font-size: 21px; }
+  #dhBrake { width: 66px; height: 74px; font-size: 13px; }
+  #dhGas { width: 66px; height: 120px; font-size: 14px; }
+  .dh-aux { right: 10px; bottom: calc(138px + env(safe-area-inset-bottom, 0px)); flex-direction: row; }
+  .dh-aux button { width: 44px; height: 44px; font-size: 17px; }
+  .dh-sheet { right: 10px; left: 10px; width: auto; top: 50px; max-height: calc(100% - 66px); }
+}
+@media (max-width: 560px) {
+  .dh-cluster { top: 108px; bottom: auto; left: 10px; right: 10px; grid-template-columns: auto auto auto 1fr; grid-template-areas: 'speed limit gear badges' 'meters meters meters meters'; }
+  .dh-badges { justify-content: flex-end; }
+  .dh-m { grid-template-columns: 1fr; }
+  .dh-slot { top: 214px; }
+  .dh-status { top: 214px; }
+  .dh-top { max-width: calc(100% - 116px); }
+  .dh-steer { height: 44%; }
 }

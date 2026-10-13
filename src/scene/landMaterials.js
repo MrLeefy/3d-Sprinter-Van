@@ -6,7 +6,7 @@ import { loadPBR } from './materials.js';
 import { GLSL_NOISE } from './season.js';
 
 // Road surface class ids (aRoad.z)
-export const RC = { interstate: 1, highway: 2, county: 3, gravel: 4, dirt: 5, street: 6, sidewalk: 7, pavement: 8 };
+export const RC = { interstate: 1, highway: 2, county: 3, gravel: 4, dirt: 5, street: 6, sidewalk: 7, pavement: 8, lawn: 9 };
 
 export function makeTerrainMaterial(season) {
   const g = loadPBR('aerial_grass_rock', { repeat: 1 / 7, normalScale: 0.9 });
@@ -80,7 +80,7 @@ export function makeTerrainMaterial(season) {
 export function makeRoadMaterial(season, { far = false } = {}) {
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0, envMapIntensity: 0.45, polygonOffset: true, polygonOffsetFactor: far ? -2 : -2, polygonOffsetUnits: far ? -40 : -6, side: THREE.DoubleSide });
   mat.onBeforeCompile = (sh) => {
-    for (const k of ['uSnowLine', 'uWet']) sh.uniforms[k] = season.u[k];
+    for (const k of ['uSnowLine', 'uWet', 'uGrassTint']) sh.uniforms[k] = season.u[k];
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 aRoad;\nvarying vec4 vRoad;\nvarying float vRY;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRoad = aRoad; vRY = position.y;');
@@ -88,6 +88,7 @@ export function makeRoadMaterial(season, { far = false } = {}) {
       .replace('#include <common>', `#include <common>
         uniform float uSnowLine;
         uniform float uWet;
+        uniform vec3 uGrassTint;
         varying vec4 vRoad;
         varying float vRY;
         ${GLSL_NOISE}`)
@@ -140,6 +141,11 @@ export function makeRoadMaterial(season, { far = false } = {}) {
           col = L3(vec3(0.56, 0.55, 0.52)) * (0.88 + 0.14 * gr);
           col *= 1.0 - 0.25 * step(fract(rs / 1.7), 0.02);
           rRough = 0.85;
+        } else if (cls == 9.0) {
+          // mown town lawn: aRoad.y / aRoad.x·w/2 carry the world x / z (mod 1000)
+          float mow = 0.5 + 0.5 * sin((rs + sm) * 0.9);
+          col = L3(vec3(0.27, 0.40, 0.14)) * uGrassTint * (0.82 + 0.3 * vn(vec2(rs, sm) * 0.45) + 0.05 * mow);
+          rRough = 0.95;
         } else if (cls == 4.0) {
           col = mix(L3(vec3(0.46, 0.38, 0.28)), L3(vec3(0.60, 0.51, 0.40)), gr);
           col *= 1.0 - 0.22 * exp(-pow((rm - 0.9) / 0.4, 2.0));

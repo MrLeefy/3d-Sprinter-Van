@@ -473,6 +473,53 @@ export class World {
     return pts;
   }
 
+  /**
+   * Relax the routed polyline toward gentle curves (highways and interstates get the widest
+   * curves), in place and with fixed end points. A pass is rejected, and a lighter one tried, when
+   * it would push the road into a lake or another settlement.
+   */
+  straighten(xs, zs, ss, cls, ends, step) {
+    const n = xs.length;
+    const SIG = { interstate: 95, highway: 62, county: 34, gravel: 18, dirt: 8 }[cls] || 20;
+    const mx = (xs[0] + xs[n - 1]) / 2, mz = (zs[0] + zs[n - 1]) / 2;
+    const reach = Math.hypot(xs[n - 1] - xs[0], zs[n - 1] - zs[0]) / 2 + 1400;
+    const lakes = this.lakesNear(mx, mz);
+    const others = this.nodesNear(mx, mz, reach + 600).filter((q) => q !== ends[0] && q !== ends[1]);
+    const clear = (X, Z) => {
+      for (let k = 0; k < n; k += 2) {
+        for (const l of lakes) if (this.lakeRn(l, X[k], Z[k]) < 1.1) return false;
+        for (const q of others) if (Math.hypot((X[k] - q.x) / (q.Rp * 1.05 + 14), (Z[k] - q.z) / (q.Rz * 1.05 + 14)) < 1) return false;
+      }
+      return true;
+    };
+    for (const f of [1, 0.6, 0.35, 0.18]) {
+      const passes = Math.round(((SIG * f) * (SIG * f)) / (0.5 * step * step));
+      let A = Float64Array.from(xs), B = Float64Array.from(zs), A2 = new Float64Array(n), B2 = new Float64Array(n);
+      for (let it = 0; it < passes; it++) {
+        A2[0] = A[0];
+        B2[0] = B[0];
+        A2[n - 1] = A[n - 1];
+        B2[n - 1] = B[n - 1];
+        for (let k = 1; k < n - 1; k++) {
+          A2[k] = 0.25 * A[k - 1] + 0.5 * A[k] + 0.25 * A[k + 1];
+          B2[k] = 0.25 * B[k - 1] + 0.5 * B[k] + 0.25 * B[k + 1];
+        }
+        [A, A2] = [A2, A];
+        [B, B2] = [B2, B];
+      }
+      if (!clear(A, B)) continue;
+      xs.set(A);
+      zs.set(B);
+      let c = 0;
+      ss[0] = 0;
+      for (let k = 1; k < n; k++) {
+        c += Math.hypot(xs[k] - xs[k - 1], zs[k] - zs[k - 1]);
+        ss[k] = c;
+      }
+      return;
+    }
+  }
+
   buildEdge(i, j, dir) {
     const cls = this.edgeClass(i, j, dir);
     const P = ROAD[cls];
@@ -495,7 +542,7 @@ export class World {
     const step = 8;
     const cum = [0];
     for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
-    const total = cum[cum.length - 1];
+    let total = cum[cum.length - 1];
     const n = Math.max(2, Math.round(total / step) + 1);
     const xs = new Float64Array(n), zs = new Float64Array(n), ss = new Float64Array(n);
     let seg = 0;
@@ -507,6 +554,8 @@ export class World {
       zs[k] = lerp(pts[seg][1], pts[seg + 1][1], t);
       ss[k] = s;
     }
+    this.straighten(xs, zs, ss, cls, [a, b], step);
+    total = ss[n - 1];
     // elevation profile: smoothed natural height, blended to the node plateaus, grade-limited
     const raw = new Float64Array(n);
     for (let k = 0; k < n; k++) raw[k] = this.baseHeight(xs[k], zs[k]);

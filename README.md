@@ -17,7 +17,7 @@ npm run dev           # interactive viewer at http://localhost:5173
 npm test              # 85 engineering acceptance tests (node --test)
 npm run report        # regenerate docs/ACCEPTANCE-REPORT.md
 npm run build         # static site in dist/
-npm run build:single  # one self-contained HTML file: dist/stealth-sprinter.html
+npm run build:single  # one-file page: dist-single/stealth-sprinter.html (three.js 0.170.0 from jsDelivr)
 ```
 
 ## What you can do in the viewer

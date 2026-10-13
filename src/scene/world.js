@@ -19,7 +19,7 @@ export const CAMERAS = {
   side: { p: [1.5, 2.2, 11.5], t: [1.5, 1.4, 0] },
   top: { p: [1.3, 11.5, 0.01], t: [1.3, 1.3, 0] },
   interior: { p: [2.5, 1.86, -0.02], t: [-1.0, 1.32, 0.02] },
-  galley: { p: [1.1, 1.9, 0.62], t: [1.55, 1.45, -0.55] },
+  galley: { p: [2.05, 2.0, 0.28], t: [1.3, 1.45, -0.62] },
   garage: { p: [-3.3, 1.35, 0.9], t: [-1.0, 1.0, 0.0] },
   underbody: { p: [1.6, 0.18, 4.4], t: [0.6, 0.45, 0] },
   dollhouse: { p: [4.4, 7.6, 6.9], t: [0.6, 1.2, 0] },
@@ -73,7 +73,11 @@ export class World {
     const c = CAMERAS[name];
     if (!c) return;
     const cam = this.stage.camera, ctl = this.stage.controls;
-    this.camTween = { t: 0, dur, p0: cam.position.clone(), t0: ctl.target.clone(), p1: new THREE.Vector3(...c.p), t1: new THREE.Vector3(...c.t) };
+    const t1 = new THREE.Vector3(...c.t);
+    const p1 = new THREE.Vector3(...c.p);
+    // Portrait screens: back the camera off so the whole van stays in frame
+    if (cam.aspect < 1.2 && !['interior', 'galley'].includes(name)) p1.sub(t1).multiplyScalar(Math.min(2.3, 1.25 / Math.max(0.4, cam.aspect))).add(t1);
+    this.camTween = { t: 0, dur, p0: cam.position.clone(), t0: ctl.target.clone(), p1, t1 };
   }
 
   weather(scn, wx, hour) {

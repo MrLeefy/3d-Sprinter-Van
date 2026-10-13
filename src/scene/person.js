@@ -109,7 +109,7 @@ export class Person {
     const A = ANCHORS[anchorName] || ANCHORS.aisleRear;
     this.path = this.route(this.anchorName, anchorName);
     this.walkT = 0;
-    this.walkDur = Math.max(0.6, this.pathLength(this.path) / 1.1);
+    this.walkDur = Math.max(0.6, this.pathLength(this.path) / 2.2);
     this.anchorName = anchorName;
     this.poseFrom = this.currentPose || POSES.stand;
     this.poseName = poseName;
@@ -119,17 +119,15 @@ export class Person {
   route(a, b) {
     const P = (n) => new THREE.Vector3(...(ANCHORS[n] || ANCHORS.aisleRear).p);
     const inside = (n) => !['rear', 'outdoorKitchen', 'outside'].includes(n);
+    const aisle = (n) => new THREE.Vector3(Math.min(2.2, Math.max(-0.05, P(n).x)), 1.65, -0.05);
+    const doorIn = new THREE.Vector3(2.05, 1.65, 0.3);
+    const doorOut = new THREE.Vector3(2.05, 0.92, 1.55);
+    // walking route between an outside anchor and the sliding door (around the passenger side)
+    const outside = (n) => (n === 'outside' ? [] : [new THREE.Vector3(-2.3, 0.92, 1.4), new THREE.Vector3(0.0, 0.92, 1.9)]);
     const pts = [P(a)];
-    const stand = (v, y = 1.65) => new THREE.Vector3(v.x, y, v.z);
-    if (inside(a) && inside(b)) {
-      pts.push(stand(new THREE.Vector3(Math.min(2.3, Math.max(-0.05, P(a).x)), 0, -0.05)));
-      pts.push(stand(new THREE.Vector3(Math.min(2.3, Math.max(-0.05, P(b).x)), 0, -0.05)));
-    } else if (inside(a) !== inside(b)) {
-      const inPt = inside(a) ? P(a) : P(b);
-      const seq = [stand(new THREE.Vector3(Math.min(2.3, Math.max(-0.05, inPt.x)), 0, -0.05)), stand(new THREE.Vector3(2.05, 0, 0.3)), new THREE.Vector3(2.05, 0.92, 1.5), new THREE.Vector3(0.0, 0.92, 2.2), new THREE.Vector3(-2.3, 0.92, 1.4)];
-      if (!inside(a)) seq.reverse();
-      pts.push(...seq);
-    }
+    if (inside(a) && inside(b)) pts.push(aisle(a), aisle(b));
+    else if (inside(a) && !inside(b)) pts.push(aisle(a), doorIn, doorOut, ...outside(b).reverse());
+    else if (!inside(a) && inside(b)) pts.push(...outside(a), doorOut, doorIn, aisle(b));
     pts.push(P(b));
     return pts;
   }

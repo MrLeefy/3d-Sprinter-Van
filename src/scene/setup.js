@@ -200,6 +200,7 @@ export function applyWeather(stage, scn, wx, hour) {
   const groundCol = v.snowGround ? new THREE.Color(0xf2f5f8) : new THREE.Color(v.ground);
   if (wx.rain) groundCol.multiplyScalar(0.7);
   stage.groundMat.color.copy(groundCol).multiplyScalar(0.45 + 0.55 * k);
+  stage.skyMat.uniforms.ground.value.copy(groundCol).multiplyScalar(night ? 0.12 : 0.35 + 0.5 * k);
   stage.groundMat.roughness = wx.rain ? 0.35 : 0.95;
   // Sun path: rises in the east (+z side), sets in the west, southern sky (−x)
   const t = (hour - wx.sunrise) / (wx.sunset - wx.sunrise);

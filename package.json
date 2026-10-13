@@ -9,14 +9,14 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test tests/*.test.js",
-    "build:single": "vite build && node scripts/build-single.mjs",
+    "build:single": "SINGLE=1 vite build --outDir dist-single && node scripts/build-single.mjs",
     "report": "node scripts/report.mjs"
   },
   "license": "MIT",
   "dependencies": {
-    "three": "^0.186.1"
+    "three": "0.170.0"
   },
   "devDependencies": {
-    "vite": "^8.3.4"
+    "vite": "8.3.4"
   }
 }

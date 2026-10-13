@@ -120,6 +120,15 @@ export class App {
     });
     $('#cutType').addEventListener('change', () => this.updateCut());
     $('#cutPos').addEventListener('input', () => this.updateCut());
+    $('#solarFit').addEventListener('change', (e) => {
+      const on = e.target.checked;
+      for (const id of ['solar-1', 'solar-2', 'solar-3']) this.world.comps.index.get(id).visible = on;
+      this.ctrl.solar = on;
+      this.res.solar = on;
+      this.snapT = 0;
+      this.toast(on ? 'Solar fitted: 3 × 340 W on the rack.' : 'Solar removed: the van now relies on the alternator and shore power to recharge.');
+      if (this.tab === 'energy') this.refreshBudget();
+    });
     $('#services').addEventListener('change', (e) => {
       this.world.modes.showServices = e.target.checked;
       this.world.modes.apply();
@@ -622,8 +631,13 @@ export class App {
     this.$('#clockTxt').textContent = `Day ${day} · ${hhmm(h)}`;
     // rail
     const st = [...STAGES].reverse().find((s) => this.master >= s.at - 0.04) || STAGES[0];
-    this.$('#stageName').textContent = st.name;
-    this.$('#stageDesc').textContent = st.desc;
+    if (this.living) {
+      this.$('#stageName').textContent = 'Daily routine';
+      this.$('#stageDesc').textContent = `${scheduleAt(h).label} — the routine is operating the van; the slider takes over when you leave Daily living.`;
+    } else {
+      this.$('#stageName').textContent = st.name;
+      this.$('#stageDesc').textContent = st.desc;
+    }
     this.$('#pct').textContent = `${Math.round(this.master * 100)} %`;
     if (document.activeElement !== this.$('#master')) this.$('#master').value = String(this.master);
     this.$('#play').textContent = this.playing ? '❚❚' : '▶';
@@ -716,7 +730,8 @@ function layoutHTML() {
   <aside class="panel left" id="left" data-open="false">
     <section class="sect"><h3>View</h3><div class="seg" id="views">${VIEWS.map(([k, n]) => `<button data-view="${k}" aria-pressed="${k === 'normal'}">${n}</button>`).join('')}</div>
       <div id="cutBox" hidden style="margin-top:7px"><div class="row"><select id="cutType" aria-label="Cutaway type"><option value="dollhouse">Dollhouse</option><option value="side">Side wall</option><option value="roof">Roof off</option></select><input type="range" id="cutPos" min="0" max="1" step="0.01" value="0.4" aria-label="Cut depth" style="flex:1"></div></div>
-      <label class="row" style="margin-top:7px;font-size:12.5px"><input type="checkbox" id="services"> Show concealed pipes, cables & ducts</label></section>
+      <label class="row" style="margin-top:7px;font-size:12.5px"><input type="checkbox" id="services"> Show concealed pipes, cables & ducts</label>
+      <label class="row" style="font-size:12.5px"><input type="checkbox" id="solarFit" checked> Rooftop solar fitted (optional, 1,020 Wp)</label></section>
     <section class="sect"><h3>Simulation mode</h3><div class="seg" id="sims">${SIM_MODES.map(([k, n, c]) => `<button data-sim="${k}" aria-pressed="${k === 'none'}"><span class="k" style="background:${c}"></span>${n}</button>`).join('')}</div></section>
     <section class="sect"><h3>Camera</h3><div class="seg three" id="cams">${Object.keys(CAMERAS).map((k) => `<button data-cam="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div></section>
     <section class="sect"><div class="row"><h3 style="margin:0">Systems</h3><button class="btn" id="resetActs" style="margin-left:auto;padding:2px 8px">Follow master</button></div>

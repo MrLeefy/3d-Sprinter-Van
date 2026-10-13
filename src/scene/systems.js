@@ -136,10 +136,11 @@ export class Flows {
           s.mesh.setMatrixAt(i++, d.matrix);
           continue;
         }
-        it.u = (it.u + (sp * dt) / Math.max(p.len, 0.05) + 1) % 1;
-        const f = it.u * (p.samples.length - 1);
-        const k = Math.floor(f);
-        const a = p.samples[k], b = p.samples[Math.min(k + 1, p.samples.length - 1)];
+        it.u = ((((it.u + (sp * dt) / Math.max(p.len || 0, 0.05)) % 1) + 1) % 1) || 0;
+        const n = p.samples.length;
+        const f = it.u * (n - 1);
+        const k = Math.min(n - 2, Math.max(0, Math.floor(f)));
+        const a = p.samples[k], b = p.samples[k + 1] || a;
         d.position.lerpVectors(a, b, f - k);
         if (s.shape === 'arrow') {
           tmp.subVectors(b, a);

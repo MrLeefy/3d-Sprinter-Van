@@ -376,7 +376,8 @@ export function step(state, scn, ctrl, dt = 60) {
   // Driving fuel: a fixed 70 km/h cruise, or the live speed from drive mode (idle ≈ 0.9 L/h, ≈ 12 L/100 km at 70–100 km/h)
   const kmh = ctrl.driveKmh;
   const driveLph = kmh == null ? (11.5 / 100) * 70 : 0.9 + 0.095 * kmh + 0.0002 * kmh * kmh;
-  state.fuelL -= (dieselLh * dt) / 3600 + (driving ? driveLph * (dt / 3600) : 0);
+  // driveFuelScale compresses distance in the drive game (settlements are ~2 km apart, not ~60 km)
+  state.fuelL -= (dieselLh * dt) / 3600 + (driving ? driveLph * (ctrl.driveFuelScale ?? 1) * (dt / 3600) : 0);
 
   // Accumulators
   const h = dt / 3600;

@@ -630,6 +630,7 @@ export class App {
     if (this.drivingMode) {
       c.driving = true; // engine running: alternator charging, fuel by live speed
       c.driveKmh = Math.abs(this.world.driver.v) * 3.6;
+      c.driveFuelScale = 14; // the drive world is ~14× more compact than real Montana
     }
     return c;
   }

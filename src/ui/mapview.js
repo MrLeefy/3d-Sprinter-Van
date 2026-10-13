@@ -99,6 +99,23 @@ export function drawWorldMap(g, W, o) {
       g.fillText(n.name, px + 7, py + 4);
     }
   }
+  // roadside discoveries: ? until found, then a gold star
+  if (o.pois) {
+    for (const p of o.pois) {
+      const px = X(p.x), py = Y(p.z);
+      if (px < -10 || py < -10 || px > w + 10 || py > h + 10) continue;
+      g.fillStyle = p.found ? '#ffd24a' : 'rgba(255,255,255,0.88)';
+      g.strokeStyle = 'rgba(0,0,0,0.6)';
+      g.lineWidth = 1;
+      g.beginPath();
+      g.arc(px, py, 4.5, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      g.fillStyle = '#222';
+      g.font = '700 8px system-ui';
+      g.fillText(p.found ? '★' : '?', px - (p.found ? 3.5 : 2.2), py + 3);
+    }
+  }
   // trail, home, waypoint, van
   if (o.trail?.length > 1) {
     g.strokeStyle = o.accent || '#ff8a3d';

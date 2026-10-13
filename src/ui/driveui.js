@@ -5,6 +5,9 @@
 import { ASSISTS } from '../scene/drive.js';
 import { SEASON_KEYS, SEASONS } from '../scene/season.js';
 import { drawWorldMap } from './mapview.js';
+import { MapScreen } from './mapscreen.js';
+import { Services } from './services.js';
+import { Passport } from './passport.js';
 
 const KEY = 'sprinter-drive-v2';
 const DEFAULTS = () => ({
@@ -35,6 +38,9 @@ export class DriveUI {
     this.t = 0;
     this.build();
     this.bind();
+    this.mapScreen = new MapScreen(this);
+    this.services = new Services(this);
+    this.passport = new Passport(this);
     this.apply(true);
   }
 
@@ -291,6 +297,7 @@ export class DriveUI {
 
   sheet(sel) {
     for (const id of ['#dhSheet', '#dhHelp']) this.$(id).hidden = id !== sel;
+    if (sel && this.passport) this.passport.sheet.hidden = true;
     if (sel === '#dhSheet') this.apply();
   }
 
@@ -304,9 +311,9 @@ export class DriveUI {
   }
 
   openMap() {
-    const m = this.modules.find((x) => x.openMap);
-    if (m) m.openMap();
-    else this.app.toast('The big map arrives with the next update.');
+    const m = this.mapScreen;
+    if (m.open) m.closeMap();
+    else m.openMap();
   }
 
   fmtSpeed(kmh) {

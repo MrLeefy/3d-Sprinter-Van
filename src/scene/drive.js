@@ -378,6 +378,10 @@ export class Driver {
     if (raw.back > 0.5 && this.v < 0.4 && this.gearSel === 'D') this.holdRev = (this.holdRev || 0) + dt;
     else if (raw.back < 0.1) this.holdRev = 0;
     if (raw.hand) brake = 1;
+    if (this.noFuel) {
+      throttle = Math.min(throttle, 0);
+      this.cruise.on = false;
+    }
     // cruise control / limiter
     const c = this.cruise;
     if (c.on) {

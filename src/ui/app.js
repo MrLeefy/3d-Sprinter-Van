@@ -16,7 +16,7 @@ import { QUALITY, TIERS, autoQuality } from '../scene/setup.js';
 import { IR_RANGE, IRONBOW_CSS } from '../scene/infrared.js';
 import { TOUR } from './tour.js';
 import { EngineSound } from '../scene/audio.js';
-import { roadZ } from '../scene/terrain.js';
+import { drawWorldMap } from './mapview.js';
 
 const SIM_MODES = [
   ['none', 'Off', '#8d9aab'], ['thermal', 'Thermal', '#ef6c3a'], ['electrical', 'Electrical', '#f2c418'], ['water', 'Water', '#3b8ff0'],
@@ -90,6 +90,11 @@ export class App {
     this.setTab(q.get('tab') || (location.hash ? location.hash.slice(1) : 'inspect'));
     this.values = resolveActuators(this.master, this.overrides).values;
     this.world.rig.apply(this.values); // so the first camera fit sees deployed awning, doors and pod
+    {
+      const D = this.world.driver;
+      if (q.get('preload')) this.world.land.preload(D.x, D.z);
+      else this.world.land.update(D.x, D.z, true);
+    }
     this.world.flyTo(q.get('cam') || 'exterior', 0.01);
     if (q.get('tour')) {
       this.startTour();
@@ -949,7 +954,7 @@ export class App {
     const rpm = D.rpm(thr);
     this.$('#dhRpm').style.width = `${Math.min(100, (rpm / 4200) * 100)}%`;
     this.$('#dhRpmT').textContent = `${Math.round(rpm / 10) * 10} rpm`;
-    this.sound?.update(rpm, thr, Math.abs(D.v), D.surfaceKey.endsWith('road') ? 0 : 1, true);
+    this.sound?.update(rpm, thr, Math.abs(D.v), D.surface.kind === 'road' || D.surface.kind === 'street' ? 0 : 1, true);
     this.mapT -= dt;
     if (this.mapT <= 0) {
       this.mapT = 0.25;
@@ -966,83 +971,15 @@ export class App {
     }
   }
 
-  /** North-up map, 1 px ≈ 1.2 m: water, forest, track, trail, camp and the van. */
+  /** North-up minimap (960 m across): lakes, towns, roads, your trail, camp and the van. */
   drawMap() {
     const cv = this.$('#dhMap');
     const g = cv.getContext('2d');
-    const D = this.world.driver, T = this.world.terrain;
-    const W = cv.width, S = 1.2, cx = W / 2;
-    const toMap = (x, z) => [cx + (x - D.x) / S, cx + (z - D.z) / S];
-    const css = getComputedStyle(this.root);
-    g.clearRect(0, 0, W, W);
-    g.fillStyle = 'rgba(30,36,30,0.85)';
-    g.beginPath();
-    g.arc(cx, cx, cx, 0, Math.PI * 2);
-    g.fill();
-    g.save();
-    g.clip();
-    // water and forest from the terrain itself (coarse grid)
-    const step = 8;
-    for (let my = 0; my < W; my += step) {
-      for (let mx = 0; mx < W; mx += step) {
-        const x = D.x + (mx + step / 2 - cx) * S, z = D.z + (my + step / 2 - cx) * S;
-        const h = T.heightAt(x, z);
-        if (h < T.waterLevel) {
-          g.fillStyle = T.biome.ice ? 'rgba(200,225,240,0.9)' : 'rgba(60,120,170,0.95)';
-          g.fillRect(mx, my, step, step);
-        }
-      }
-    }
-    g.fillStyle = 'rgba(70,110,60,0.9)';
-    for (const c of T.chunks.values()) {
-      for (const [x, , z] of c.items.trees) {
-        const [px, py] = toMap(x, z);
-        if (px > -2 && px < W + 2 && py > -2 && py < W + 2) g.fillRect(px - 1, py - 1, 2, 2);
-      }
-    }
-    // track
-    g.strokeStyle = 'rgba(214,190,150,0.95)';
-    g.lineWidth = 5 / S;
-    g.beginPath();
-    for (let x = D.x - cx * S - 10; x <= D.x + cx * S + 10; x += 4) {
-      const [px, py] = toMap(x, roadZ(x));
-      if (x === D.x - cx * S - 10) g.moveTo(px, py);
-      else g.lineTo(px, py);
-    }
-    g.stroke();
-    // trail
-    g.strokeStyle = css.getPropertyValue('--accent') || '#ff8a3d';
-    g.lineWidth = 1.5;
-    g.beginPath();
-    D.trail.forEach(([x, z], i) => {
-      const [px, py] = toMap(x, z);
-      if (i) g.lineTo(px, py);
-      else g.moveTo(px, py);
+    const D = this.world.driver, W = this.world.gen;
+    drawWorldMap(g, W, {
+      w: cv.width, h: cv.height, cx: D.x, cz: D.z, mpp: 4, van: { x: D.x, z: D.z, yaw: D.yaw }, trail: D.trail, home: W.home,
+      frozen: this.world.terrain.season.u.uIce.value > 0.5, accent: getComputedStyle(this.root).getPropertyValue('--accent') || '#ff8a3d',
     });
-    g.stroke();
-    // camp
-    const [hx, hy] = toMap(0, 0);
-    g.fillStyle = '#fff';
-    g.beginPath();
-    g.arc(hx, hy, 4, 0, Math.PI * 2);
-    g.fill();
-    g.restore();
-    // van arrow (heading)
-    g.save();
-    g.translate(cx, cx);
-    g.rotate(-D.yaw);
-    g.fillStyle = css.getPropertyValue('--accent') || '#ff8a3d';
-    g.beginPath();
-    g.moveTo(9, 0);
-    g.lineTo(-6, -5);
-    g.lineTo(-3, 0);
-    g.lineTo(-6, 5);
-    g.closePath();
-    g.fill();
-    g.restore();
-    g.fillStyle = 'rgba(255,255,255,0.8)';
-    g.font = '600 12px system-ui, sans-serif';
-    g.fillText('N', cx - 4, 14);
   }
 
   // ── First-person walk ───────────────────────────────────

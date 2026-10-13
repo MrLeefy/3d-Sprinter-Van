@@ -13,7 +13,7 @@ import { CITY_NAMES, TOWN_NAMES, makeName } from './names.js';
 
 export const S = 2200; // node spacing (m)
 const LS = 3600; // lake cell (m)
-const HC = 64; // road spatial-hash cell (m)
+export const HC = 64; // road spatial-hash cell (m)
 export const ELEV0 = 1100; // world y = 0 is 1,100 m above sea level (display only)
 
 export const ROAD = {
@@ -572,6 +572,24 @@ export class World {
       }
     }
     return pending;
+  }
+
+  /** Unique road segments whose boxes touch a rectangle. */
+  segsIn(x0, z0, x1, z1) {
+    const out = new Set();
+    for (let cx = Math.floor(x0 / HC); cx <= Math.floor(x1 / HC); cx++) {
+      for (let cz = Math.floor(z0 / HC); cz <= Math.floor(z1 / HC); cz++) {
+        const l = this.hash.get(cx * 262144 + cz);
+        if (!l) continue;
+        for (const sg of l) {
+          const { e, k } = sg;
+          const ax = e.xs[k], az = e.zs[k], bx = e.xs[k + 1], bz = e.zs[k + 1];
+          if (Math.max(ax, bx) < x0 || Math.min(ax, bx) > x1 || Math.max(az, bz) < z0 || Math.min(az, bz) > z1) continue;
+          out.add(sg);
+        }
+      }
+    }
+    return out;
   }
 
   /** Nearest road centre line within the hash cell; null if none is close. */

@@ -4,7 +4,7 @@
 // The van stays at the scene origin; the terrain is moved underneath (floating origin).
 import * as THREE from 'three';
 import { weightReport } from '../sim/weight.js';
-import { SURFACES } from './terrain.js';
+import { SURFACES } from './land.js';
 
 const L = 4.325; // wheelbase
 const TRACK = 1.73;
@@ -26,9 +26,10 @@ export class Driver {
     this.mass = weightReport().gvw;
     this.active = false;
     this.ready = false; // true once everything is stowed for travel
-    this.x = 0;
-    this.z = 0;
-    this.yaw = 0;
+    const H = world.gen.home;
+    this.x = H.x;
+    this.z = H.z;
+    this.yaw = H.yaw;
     this.v = 0;
     this.delta = 0;
     this.spin = 0;
@@ -43,8 +44,8 @@ export class Driver {
     this.dyn = { p: 0, pv: 0, r: 0, rv: 0, h: 0, hv: 0 };
     this.aLong = 0;
     this.yawRate = 0;
-    this.surface = SURFACES.road;
-    this.surfaceKey = 'road';
+    this.surface = SURFACES.asphalt;
+    this.surfaceKey = 'asphalt';
     this.slope = 0;
     this.braking = false;
     this.events = [];
@@ -132,13 +133,14 @@ export class Driver {
     return CAM_LABEL[this.camMode];
   }
 
-  /** Teleport back to the camp clearing. */
+  /** Teleport back to the starting camp beside the highway. */
   home() {
-    this.x = 0;
-    this.z = 0;
-    this.yaw = 0;
+    const H = this.world.gen.home;
+    this.x = H.x;
+    this.z = H.z;
+    this.yaw = H.yaw;
     this.v = 0;
-    this.trail = [[0, 0]];
+    this.trail = [[H.x, H.z]];
   }
 
   input() {
@@ -193,7 +195,7 @@ export class Driver {
       const a = k * (target - x) - c * v;
       return [x + (v + a * dt) * dt, v + a * dt];
     };
-    const rough = this.active && !this.surfaceKey.endsWith('road') ? Math.min(1, Math.abs(this.v) / 12) : 0;
+    const rough = this.active && this.surface.kind !== 'road' && this.surface.kind !== 'street' ? Math.min(1, Math.abs(this.v) / 12) : 0;
     [d.p, d.pv] = spring(d.p, d.pv, this.aLong * 0.006, 60, 11);
     [d.r, d.rv] = spring(d.r, d.rv, Math.max(-0.05, Math.min(0.05, this.v * this.yawRate * 0.011)), 50, 9);
     [d.h, d.hv] = spring(d.h, d.hv, rough * 0.012 * Math.sin(performance.now() / 70) * Math.sin(performance.now() / 113), 220, 18);
@@ -222,8 +224,8 @@ export class Driver {
     const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
     const fx = this.x + 2.2 * c, fz = this.z - 2.2 * s;
     const sf = T.surfaceAt(fx, fz);
-    this.surfaceKey = sf.key === 'water' ? 'mud' : sf.key;
-    this.surface = SURFACES[this.surfaceKey] || SURFACES.grass;
+    this.surfaceKey = sf.key;
+    this.surface = sf;
     const { crr, mu } = this.surface;
     // steering: rate-limited, softened with speed
     const target = inp.steer * DELTA_MAX * Math.max(0.3, 1 - Math.abs(this.v) / 40);
@@ -252,7 +254,7 @@ export class Driver {
     // wheelspin on a grade steeper than the grip allows (rear-wheel drive, laden)
     if (Math.abs(inp.throttle) > 0.5 && Math.abs(this.v) < 0.6 && Math.sign(inp.throttle) * grade > traction / (m * G) - crr) this.emit('stuck');
     // deep water ahead: refuse to ford beyond ~0.6 m
-    if (sf.key === 'water' && sf.depth > 0.6 && this.v > 0) {
+    if (sf.key === 'water' && this.v > 0) {
       this.v = 0;
       this.emit('deep');
     }

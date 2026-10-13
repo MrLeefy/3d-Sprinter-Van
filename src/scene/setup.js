@@ -114,7 +114,7 @@ export function createStage(container, { quality = autoQuality() } = {}) {
   container.appendChild(labels.domElement);
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(40, container.clientWidth / container.clientHeight, 0.05, 900);
+  const camera = new THREE.PerspectiveCamera(40, container.clientWidth / container.clientHeight, 0.1, 6000);
   camera.position.set(8.2, 3.4, 7.6);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.target.set(1.6, 1.3, 0);
@@ -155,6 +155,8 @@ export function createStage(container, { quality = autoQuality() } = {}) {
   const sky = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), skyMat);
   sky.scale.setScalar(800);
   sky.frustumCulled = false;
+  sky.renderOrder = -100; // the dome is drawn first; terrain beyond 400 m must overwrite it
+  skyMat.depthTest = false;
   scene.add(sky);
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envScene = new THREE.Scene();
@@ -197,7 +199,7 @@ export function createStage(container, { quality = autoQuality() } = {}) {
   contact.renderOrder = 1;
   scene.add(contact);
 
-  scene.fog = new THREE.Fog(0xe6e2d3, 60, 320);
+  scene.fog = new THREE.FogExp2(0xe6e2d3, 0.0011);
 
   // ── Precipitation ────────────────────────────────────────
   const rainN = 6000;
@@ -379,8 +381,7 @@ export function applyWeather(stage, scn, wx, hour) {
   const fogCol = new THREE.Color().setHSL(0.6, 0.15, 0.08 + 0.55 * dayK);
   if (!night) fogCol.lerp(new THREE.Color(v.horizon), 0.6);
   stage.fog.color.copy(fogCol);
-  stage.fog.near = wx.rain ? 18 : 80 - (v.haze ?? 0) * 50;
-  stage.fog.far = wx.rain ? 130 : 420 - (v.haze ?? 0) * 250;
+  stage.fog.density = wx.rain ? 0.0042 : night ? 0.0009 : 0.0011 + (v.haze ?? 0) * 0.0016;
   stage.rain.visible = !!wx.rain;
   stage.snow.visible = (wx.snow ?? 0) > 0;
   stage.contact.material.opacity = night ? 0.5 : 0.75 + 0.25 * cloud;

@@ -126,7 +126,7 @@ export const COMPONENTS = [
   },
   {
     id: 'combi-cowl', name: 'Heater wall cowl (exhaust / air intake)', system: 'climate', zone: 'garage', placement: 'through-wall',
-    box: B(-0.42, -0.28, 1.12, 1.24, 0.84, 1.04), mass: 0.6, cost: 0, status: 'verified', cert: 'certified',
+    box: B(-0.3, -0.16, 1.12, 1.24, 0.84, 1.04), mass: 0.6, cost: 0, status: 'verified', cert: 'certified',
     spec: 'Wall cowl above the passenger rear wheel arch: ≥ 0.3 m from every opening, outside the 270° rear-door sweep, > 2 m from the fresh-air inlet', principle: 'Separates combustion gases from cabin air completely.',
     service: 'Keep clear of snow and mud.', access: 'Exterior', depends: ['combi-heater'],
   },
@@ -244,7 +244,7 @@ export const COMPONENTS = [
   },
   {
     id: 'shore-inlet', name: 'Concealed shore-power inlet', system: 'electrical', zone: 'garage', placement: 'through-wall',
-    box: B(-0.74, -0.62, 0.8, 0.92, -1.02, -0.94), mass: 0.8, cost: 120, status: 'typical', cert: 'electrician',
+    box: B(-0.5, -0.38, 1.1, 1.22, -1.02, -0.94), mass: 0.8, cost: 120, status: 'typical', cert: 'electrician',
     spec: '30 A 120 V inlet behind a body-colour flap styled like an OEM service flap', principle: 'Campground/house power without revealing the conversion.',
     service: 'Check flap seal.', access: 'Exterior (driver side, ahead of the rear-door sweep)', depends: ['inverter'],
   },

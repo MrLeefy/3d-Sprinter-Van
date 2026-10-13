@@ -106,14 +106,15 @@ export function mechanicalChecks() {
   check(out, 'Expansion', 'pod-stroke', 'Slide-out pod: 250 mm stroke gives a 2.08 m bed; parked-only interlock', true,
     `outer face ${r1(-podOut.z[0] * 1000, 0)} mm from centreline`, `mirror line ${r1(mirror * 1000, 0)} mm`,
     `Extends ${r1((-podOut.z[0] - mirror) * 1000, 0)} mm beyond the mirror line → ignition interlock + parking brake required.`, true);
-  // Pod vs driver rear door at 270°: door lies along the body side x ∈ [-1.62, -0.84]
-  const doorSweep = { x: [BODY.rearDoorOuterX, -0.84], y: [0.62, 2.5], z: [-1.12, -1.0] };
+  // Pod vs driver rear door at 270°: the 0.84 m door folds back on its offset hinge and lies
+  // along the body side over x ∈ [-1.47, -0.63]
+  const doorSweep = { x: [-1.47, -0.63], y: [0.62, 2.5], z: [-1.12, -1.0] };
   const conflict = boxesOverlap(doorSweep, podOut);
   check(out, 'Expansion', 'pod-door', 'Pod vs driver rear door at 270° — handled by 180° detent interlock', conflict, 'conflict detected → interlock', '180° stop while pod out',
     'The driver door is mechanically limited to its 180° detent whenever the pod is deployed (bench still usable).');
   // Heater cowl & shore inlet outside the open-door envelopes
   const cowl = byId['combi-cowl'].box, shore = byId['shore-inlet'].box;
-  const passDoor = { x: [BODY.rearDoorOuterX, -0.84], y: [0.62, 2.5], z: [1.0, 1.12] };
+  const passDoor = { x: [-1.47, -0.63], y: [0.62, 2.5], z: [1.0, 1.12] };
   check(out, 'Expansion', 'cowl-door', 'Heater cowl not covered by the passenger rear door at 270°', !boxesOverlap(passDoor, cowl) && cowl.x[0] - passDoor.x[1] >= 0.3,
     `${r1((cowl.x[0] - passDoor.x[1]) * 1000, 0)} mm clear`, '≥ 300 mm');
   check(out, 'Expansion', 'shore-door', 'Shore inlet clear of the driver rear door at 270°', shore.x[0] - doorSweep.x[1] >= 0.08, `${r1((shore.x[0] - doorSweep.x[1]) * 1000, 0)} mm clear`, '≥ 80 mm');

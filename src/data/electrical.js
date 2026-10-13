@@ -141,7 +141,7 @@ export const WIRES = [
     pts: [[3.07, 0.62, -0.56], [2.2, 0.63, -0.42], [0.4, 0.63, -0.2], [-1.0, 0.63, -0.25], [-1.42, 0.7, -0.3], [-1.42, 1.0, -0.32], [-1.4, 1.2, -0.79]] },
   { id: 'w-orion', kind: 'dc', from: 'orion-1', to: 'lynx-bms', circuit: 'orion-out', source: 'alternator', pts: [[-1.32, 1.22, -0.8], [-1.32, 1.17, -0.8]] },
   { id: 'w-shore', kind: 'shore', from: 'shore-inlet', to: 'inverter', circuit: 'shore', source: 'shore',
-    pts: [[-0.68, 0.86, -0.96], [-0.6, 0.9, -0.87], [-0.62, 1.24, -0.86], [-0.69, 1.25, -0.79]] },
+    pts: [[-0.44, 1.16, -0.96], [-0.5, 1.2, -0.87], [-0.6, 1.26, -0.86], [-0.69, 1.25, -0.79]] },
   { id: 'w-inv-ac', kind: 'ac', from: 'inverter', to: 'ac-panel', circuit: 'ac-main', pts: [[-0.69, 1.28, -0.79], [-0.85, 1.4, -0.84], [-0.95, 1.38, -0.81]] },
   { id: 'w-ac-cook', kind: 'ac', from: 'ac-panel', to: 'cooktop', circuit: 'ac-cooktop', load: 'induction',
     pts: [[-1.05, 1.42, -0.84], [-0.5, 1.46, -0.865], [0.6, 1.1, -0.865], [1.3, 1.45, -0.845], [1.455, 1.52, -0.55]] },

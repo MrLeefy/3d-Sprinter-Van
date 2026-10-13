@@ -126,7 +126,7 @@ export function step(state, scn, ctrl, dt = 60) {
     else if (coverPolicy === 'reflective-day') covers = night || (wx.ghi > 150 && act?.id !== 'cook') ? 1 : 0;
     else covers = night || act?.id === 'away' ? 1 : 0;
   }
-  const podOut = act ? (act.acts?.slideOut ?? (night ? 1 : 0)) > 0.5 && !driving : false;
+  const podOut = ctrl.podOut ?? (act ? (act.acts?.slideOut ?? (night ? 1 : 0)) > 0.5 && !driving : false);
 
   // ── Ventilation ───────────────────────────────────────────────
   const cl = ctrl.climate;
@@ -141,7 +141,9 @@ export function step(state, scn, ctrl, dt = 60) {
   if (cl.mode === 'vent' && lv.fanMain < 2) lv.fanMain = 2;
   const exhaust = VENT_RATES.fanMain[lv.fanMain] + VENT_RATES.fanBath[lv.fanBath] + VENT_RATES.hood[lv.hood];
   const supply = VENT_RATES.freshFan[lv.freshFan];
-  const ventM3h = Math.max(exhaust, supply) + (driving ? 60 : 0);
+  // An open sliding or rear door exchanges roughly 500–900 m³/h depending on wind
+  const doorM3h = (ctrl.doorsOpen || 0) * (500 + 80 * wx.wind);
+  const ventM3h = Math.max(exhaust, supply) + (driving ? 60 : 0) + doorM3h;
   const infM3h = AIR.infiltrationACH * AIR.volumeM3 * (1 + wx.wind * 0.05);
   const totalAir = ventM3h + infM3h;
 
@@ -210,7 +212,7 @@ export function step(state, scn, ctrl, dt = 60) {
   const heatMode = (cl.mode === 'auto' || cl.mode === 'heat') && !driving;
   const fuelAvail = state.fuelL > VAN.fuelTank.v * 0.25; // standpipe
   if (heatMode && !dead) {
-    if (state.Tin < heatSP - 0.3) state.heatOn = true;
+    if (state.Tin < heatSP - 0.3 || (passive < -150 && state.Tin < heatSP + 0.1)) state.heatOn = true;
     if (state.Tin > heatSP + 0.4) state.heatOn = false;
     if (state.heatOn) {
       const need = Math.max(0, -passive + ((heatSP + 0.3 - state.Tin) * C) / 900);
@@ -262,7 +264,7 @@ export function step(state, scn, ctrl, dt = 60) {
   if (acAllowed && (acLevel > 0 || (coolMode && cl.mode !== 'heat'))) {
     const autoMode = acLevel === 2 || (acLevel === 0 && coolMode);
     if (autoMode) {
-      if (state.Tin > coolSP + 0.5) state.acOn = true;
+      if (state.Tin > coolSP + 0.5 || (passive > 150 && state.Tin > coolSP - 0.1)) state.acOn = true;
       if (state.Tin < coolSP - 0.5) state.acOn = false;
     } else state.acOn = acLevel > 0;
     if (state.acOn) {

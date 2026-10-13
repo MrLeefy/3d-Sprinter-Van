@@ -5,42 +5,42 @@ const SUNNY = { cloud: 0.05, rain: 0, snow: 0 };
 
 export const SCENARIOS = [
   {
-    id: 'summer', name: 'Hot summer sun', icon: '☀', days: 1,
+    id: 'summer', name: 'Hot summer sun', short: 'Summer sun', icon: '☀', days: 1,
     weather: [{ Tmin: 24, Tmax: 38, rhMin: 22, rhMax: 50, ghiPeak: 920, sunrise: 5.8, sunset: 20.4, ...SUNNY, wind: 2 }],
     visuals: { sky: 0x8ec5ff, horizon: 0xf3e2c0, ground: 0xc8b48a, sun: 1.0, haze: 0.0 },
     climate: { heatDay: 18, heatNight: 16, coolDay: 26, coolNight: 24, covers: 'reflective-day' },
     story: 'Parked in full sun at 38 °C. The white roof and reflective window covers cut solar gain; the 12 V roof AC runs from the battery with no engine idling, while 1 kW of solar offsets part of the load. Expect the battery to fall during hot afternoons — a 1–2 h drive or shore hook-up every couple of days keeps daytime AC sustainable.',
   },
   {
-    id: 'winter', name: 'Cold winter', icon: '❄', days: 1,
+    id: 'winter', name: 'Cold winter', short: 'Winter −18 °C', icon: '❄', days: 1,
     weather: [{ Tmin: -18, Tmax: -6, rhMin: 70, rhMax: 90, ghiPeak: 380, sunrise: 7.9, sunset: 16.6, cloud: 0.2, rain: 0, snow: 0.4, wind: 4 }],
     visuals: { sky: 0xb9c7d6, horizon: 0xe8eef5, ground: 0xf4f7fa, sun: 0.55, haze: 0.15, snowGround: true },
     climate: { heatDay: 20, heatNight: 16, coolDay: 26, coolNight: 26, covers: 'always' },
     story: 'Down to -18 °C. The Combi D 6 E burns diesel from the vehicle tank (room-sealed, exhaust outside) to heat the cabin and water. All fresh-water plumbing is inside the heated envelope; the grey tank has a heated jacket. Ventilation keeps running to control CO₂ and condensation, which costs heat — the simulation shows the real diesel bill.',
   },
   {
-    id: 'rain', name: 'Heavy rain', icon: '☂', days: 1,
+    id: 'rain', name: 'Heavy rain', short: 'Heavy rain', icon: '☂', days: 1,
     weather: [{ Tmin: 9, Tmax: 13, rhMin: 88, rhMax: 98, ghiPeak: 140, sunrise: 6.6, sunset: 19.4, cloud: 0.85, rain: 1, snow: 0, wind: 6 }],
     visuals: { sky: 0x6c7a89, horizon: 0x9aa5b1, ground: 0x5d6b52, sun: 0.25, haze: 0.35 },
     climate: { heatDay: 19, heatNight: 16, coolDay: 26, coolNight: 26, covers: 'night' },
     story: 'A full day of heavy rain: solar drops to ~15 %, doors stay shut. Cooking is all-electric induction with the hood ducted to the roof, and the rain-capped roof fans keep humidity down so windows do not stream with condensation. Battery is the limit — after about two rain days without driving or shore power, load-shedding begins.',
   },
   {
-    id: 'humid', name: 'Humid heat', icon: '💧', days: 1,
+    id: 'humid', name: 'Humid heat', short: 'Humid', icon: '💧', days: 1,
     weather: [{ Tmin: 25, Tmax: 32, rhMin: 70, rhMax: 95, ghiPeak: 720, sunrise: 6.2, sunset: 19.0, cloud: 0.35, rain: 0, snow: 0, wind: 1 }],
     visuals: { sky: 0xa7c4c9, horizon: 0xe4e9de, ground: 0x6f8f4e, sun: 0.75, haze: 0.45 },
     climate: { heatDay: 18, heatNight: 16, coolDay: 25, coolNight: 24, covers: 'reflective-day' },
     story: 'Muggy 32 °C and 85 % RH. The AC removes moisture as well as heat (condensate drains to the roof gutter — several litres per day); the bath fan extracts shower steam at source. Without dehumidification the interior would reach the dew point on cold surfaces.',
   },
   {
-    id: 'overnight', name: 'Overnight off-grid', icon: '☾', days: 1, startHour: 17,
+    id: 'overnight', name: 'Overnight off-grid', short: 'Overnight', icon: '☾', days: 1, startHour: 17,
     weather: [{ Tmin: 6, Tmax: 17, rhMin: 45, rhMax: 85, ghiPeak: 820, sunrise: 6.4, sunset: 19.6, ...SUNNY, wind: 2 }],
     visuals: { sky: 0x1b2a4a, horizon: 0x4a5a7a, ground: 0x4c5a3e, sun: 0.15, haze: 0.1, night: true },
     climate: { heatDay: 20, heatNight: 15, coolDay: 26, coolNight: 26, covers: 'night' },
     story: 'Arrive at a trailhead at 17:00 with no hookups. Cook dinner, shower, sleep with the heater on a 15 °C night setback and the fresh-air fan sweeping the bed area — CO₂ stays below 1,000 ppm with every door and window closed.',
   },
   {
-    id: 'multiday', name: '5 days without hookups', icon: '⧗', days: 5,
+    id: 'multiday', name: '5 days without hookups', short: '5 days off-grid', icon: '⧗', days: 5,
     weather: [
       { Tmin: 7, Tmax: 21, rhMin: 40, rhMax: 80, ghiPeak: 820, sunrise: 6.5, sunset: 19.3, ...SUNNY, wind: 2 },
       { Tmin: 9, Tmax: 18, rhMin: 55, rhMax: 85, ghiPeak: 420, sunrise: 6.5, sunset: 19.3, cloud: 0.6, rain: 0, snow: 0, wind: 3 },

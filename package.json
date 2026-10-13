@@ -8,7 +8,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "build:single": "vite build && node scripts/build-single.mjs",
+    "report": "node scripts/report.mjs"
   },
   "license": "MIT",
   "dependencies": {

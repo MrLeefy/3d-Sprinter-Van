@@ -130,7 +130,7 @@ export const AIRFLOWS = [
   { id: 'a-heat-return', kind: 'recirc', requires: ['heater'], label: 'Return air → garage louvre → heater',
     pts: [[0.5, 1.0, -0.1], [0.0, 0.85, -0.2], [-0.15, 0.85, -0.2], [-0.5, 0.95, 0.3], [-0.62, 0.9, 0.55]] },
   { id: 'a-heater-exhaust', kind: 'exhaust', requires: ['heater'], label: 'Combustion exhaust (sealed) → wall cowl',
-    pts: [[-0.62, 1.0, 0.8], [-0.35, 1.18, 0.86], [-0.35, 1.18, 1.04], [-0.37, 1.25, 1.3], [-0.42, 1.5, 1.6]] },
+    pts: [[-0.62, 1.0, 0.8], [-0.23, 1.18, 0.86], [-0.23, 1.18, 1.04], [-0.25, 1.25, 1.3], [-0.3, 1.5, 1.6]] },
   { id: 'a-battery', kind: 'battery', requires: ['monitor'], label: 'Electrical-bay cooling',
     pts: [[-1.3, 0.8, -0.55], [-1.0, 1.1, -0.6], [-0.6, 1.25, -0.4], [-0.17, 1.35, -0.33], [0.2, 1.5, -0.2]] },
   { id: 'a-defrost', kind: 'heatWarm', requires: ['heater'], label: 'Warm, dry air across the windshield',

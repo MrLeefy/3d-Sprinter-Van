@@ -103,6 +103,7 @@ export class Modes {
         return;
       }
       if (kind === 'rack') {
+        m.visible = !(cut && this.cut.type !== 'side');
         m.material = xray && focus ? M.ghost : orig;
         return;
       }
@@ -128,6 +129,10 @@ export class Modes {
         if (!m.isMesh) return;
         m.material = ghost ? M.ghost : m.userData.origMat;
       });
+      // A dollhouse / roof-off cut also lifts the roof equipment away
+      const c = byId[id];
+      const roofKit = c.placement === 'roof' || c.placement === 'through-roof' || id === 'awning' || id === 'roof-rack';
+      if (g.children[0]) g.children[0].visible = !(cut && roofKit && this.cut.type !== 'side');
       if (id === 'window-covers' || id === 'insulation' || id === 'lighting') continue;
     }
     // Systems

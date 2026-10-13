@@ -14,6 +14,7 @@ import { binder, hhmm, esc } from './fmt.js';
 import { FLOW_COLORS } from '../scene/materials.js';
 import { QUALITY, autoQuality } from '../scene/setup.js';
 import { IR_RANGE, IRONBOW_CSS } from '../scene/infrared.js';
+import { TOUR } from './tour.js';
 
 const SIM_MODES = [
   ['none', 'Off', '#8d9aab'], ['thermal', 'Thermal', '#ef6c3a'], ['electrical', 'Electrical', '#f2c418'], ['water', 'Water', '#3b8ff0'],
@@ -76,8 +77,14 @@ export class App {
     if (q.get('sim')) this.setSim(q.get('sim'));
     if (q.get('hour')) this.setHour(parseFloat(q.get('hour')));
     if (q.get('ir') === '1') this.setInfrared(true);
+    if (q.get('ui') === '0') this.setPhoto(true);
     this.setTab(q.get('tab') || (location.hash ? location.hash.slice(1) : 'inspect'));
     this.world.flyTo(q.get('cam') || 'exterior', 0.01);
+    if (q.get('tour')) {
+      this.startTour();
+      this.tourGo(parseInt(q.get('tour'), 10) - 1);
+    }
+    if (q.get('walk') === '1') this.enterWalk();
     this.last = performance.now();
     this.snapT = 0;
     this.uiT = 0;
@@ -134,6 +141,33 @@ export class App {
       if (this.tab === 'energy') this.refreshBudget();
     });
     $('#irCam').addEventListener('change', (e) => this.setInfrared(e.target.checked));
+    $('#walkBtn').addEventListener('click', () => (this.world.walker.on ? this.exitWalk() : this.enterWalk()));
+    $('#walkExit').addEventListener('click', () => this.exitWalk());
+    for (const b of this.root.querySelectorAll('[data-pad]')) {
+      const axis = b.dataset.pad[0], v = parseFloat(b.dataset.pad.slice(1));
+      const pad = this.world.walker.pad;
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        pad[axis] = v;
+      });
+      for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => (pad[axis] = 0));
+    }
+    $('#tourBtn').addEventListener('click', () => (this.tour ? this.stopTour() : this.startTour()));
+    $('#tcClose').addEventListener('click', () => this.stopTour());
+    $('#tcPrev').addEventListener('click', () => this.tourGo(this.tour.i - 1));
+    $('#tcNext').addEventListener('click', () => this.tourGo(this.tour.i + 1));
+    $('#tcPlay').addEventListener('click', () => {
+      this.tour.playing = !this.tour.playing;
+      $('#tcPlay').textContent = this.tour.playing ? '❚❚' : '▶';
+      $('#tcPlay').setAttribute('aria-label', this.tour.playing ? 'Pause tour' : 'Play tour');
+    });
+    window.addEventListener('keydown', (e) => {
+      if ((e.key === 'h' || e.key === 'H') && !e.target.closest?.('input, select, textarea') && !this.world.walker.on) this.setPhoto(!this.photo);
+      if (e.key !== 'Escape') return;
+      if (this.photo) return this.setPhoto(false);
+      if (this.world.walker.on) this.exitWalk();
+      else if (this.tour) this.stopTour();
+    });
     $('#services').addEventListener('change', (e) => {
       this.world.modes.showServices = e.target.checked;
       this.world.modes.apply();
@@ -575,6 +609,12 @@ export class App {
       this.master = Math.max(0, Math.min(1, this.master + (this.playDir * dt) / 14));
       if (this.master <= 0 || this.master >= 1) this.playing = false;
     }
+    if (this.masterGoal != null) {
+      const d = this.masterGoal - this.master;
+      this.master += Math.sign(d) * Math.min(Math.abs(d), dt * 0.3);
+      if (Math.abs(d) < 1e-4) this.masterGoal = null;
+    }
+    this.tourTick(dt);
     if (this.pumpPulse > 0) this.pumpPulse -= dt;
     // actuator targets (smooth operation of individual systems)
     for (const [id, tgt] of Object.entries(this.targets)) {
@@ -705,6 +745,88 @@ export class App {
     s.tex.needsUpdate = true;
   }
 
+  /** Photo mode: hide every panel so only the 3D view remains (H toggles). */
+  setPhoto(on) {
+    this.photo = on;
+    this.root.classList.toggle('photo', on);
+    this.world.stage.fullView = on;
+    this.world.stage.onResize();
+    if (on) this.toast('Photo mode — press H or Esc to bring the panels back.');
+  }
+
+  // ── First-person walk ───────────────────────────────────
+  enterWalk() {
+    if (this.tour) this.stopTour();
+    if (this.living) this.setSim('none');
+    if (this.master < 0.45) this.masterGoal = 0.5;
+    if (this.world.modes.view === 'cutaway' || this.world.modes.view === 'exploded') this.setView('normal');
+    this.world.modes.apply();
+    this.world.walker.enter();
+    this.$('#walkHud').hidden = false;
+    this.$('#walkBtn').textContent = 'Leave first person';
+    this.toast('Walking inside — drag to look, W A S D or arrows to move, Esc to leave.');
+  }
+
+  exitWalk() {
+    this.world.walker.exit();
+    this.$('#walkHud').hidden = true;
+    this.$('#walkBtn').textContent = 'Walk inside · first person';
+  }
+
+  // ── Guided tour ─────────────────────────────────────────
+  startTour() {
+    if (this.world.walker.on) this.exitWalk();
+    this.tour = { i: -1, t: 0, playing: true };
+    this.$('#tourBtn').setAttribute('aria-pressed', 'true');
+    this.$('#tourCard').hidden = false;
+    this.$('#tcPlay').textContent = '❚❚';
+    this.tourGo(0);
+  }
+
+  stopTour() {
+    this.tour = null;
+    this.$('#tourBtn').setAttribute('aria-pressed', 'false');
+    this.$('#tourCard').hidden = true;
+  }
+
+  tourGo(i) {
+    if (!this.tour) return;
+    if (i < 0) i = 0;
+    if (i >= TOUR.length) return this.stopTour();
+    const st = TOUR[i];
+    this.tour.i = i;
+    this.tour.t = 0;
+    if (st.scn && st.scn !== this.scnId) this.setScenario(st.scn, true);
+    if (st.hour != null) this.setHour(st.hour);
+    this.setClock(!!st.clock);
+    if (st.master != null) this.masterGoal = st.master;
+    this.targets = {};
+    this.overrides = {};
+    for (const [id, v] of Object.entries(st.acts || {})) this.targets[id] = v;
+    if (st.view === 'cutaway') {
+      this.$('#cutType').value = st.cutType || 'dollhouse';
+      this.$('#cutPos').value = String(st.cutPos ?? 0.4);
+    }
+    if (st.sim !== 'living') this.setView(st.view || 'normal');
+    this.setSim(st.sim || 'none');
+    this.setInfrared(!!st.ir);
+    if (st.tab) this.setTab(st.tab);
+    if (st.cam) this.world.flyTo(st.cam, 2.2);
+    this.$('#tcStep').textContent = `Guided tour · ${i + 1} / ${TOUR.length}`;
+    this.$('#tcTitle').textContent = st.title;
+    this.$('#tcText').textContent = st.text;
+    this.$('#tcPrev').disabled = i === 0;
+  }
+
+  tourTick(dt) {
+    const T = this.tour;
+    if (!T) return;
+    const dur = TOUR[T.i]?.dur || 11;
+    if (T.playing) T.t += dt;
+    this.$('#tcBar').style.width = `${Math.min(100, (T.t / dur) * 100)}%`;
+    if (T.t >= dur) this.tourGo(T.i + 1);
+  }
+
   setInfrared(on) {
     this.ir = on;
     this.$('#irCam').checked = on;
@@ -751,6 +873,7 @@ function layoutHTML() {
   <header class="topbar">
     <div class="brand"><h1>Stealth Sprinter</h1><small>${esc(VAN.shortName)} · four-season off-grid camper · interactive engineering model</small></div>
     <div class="scn" id="scn" role="group" aria-label="Environment">${SCENARIOS.map((s) => `<button class="chip" data-scn="${s.id}" aria-pressed="false" title="${esc(s.name)}">${esc(s.short)}</button>`).join('')}</div>
+    <button class="iconbtn tourbtn" id="tourBtn" aria-pressed="false">Guided tour</button>
     <div class="clock"><span class="time" id="clockTxt">Day 1 · 13:00</span><input type="range" id="hour" min="0" max="23.99" step="0.05" value="13" aria-label="Time of day">
       <button class="iconbtn" id="clockPlay" aria-pressed="false" aria-label="Run simulated time">▶</button>
       <select id="speed" aria-label="Simulation speed"><option value="1">1 min/s</option><option value="6">6 min/s</option><option value="10" selected>10 min/s</option><option value="30">30 min/s</option><option value="60">1 h/s</option></select></div>
@@ -762,7 +885,8 @@ function layoutHTML() {
       <label class="row" style="font-size:12.5px"><input type="checkbox" id="services"> Show concealed pipes, cables & ducts</label>
       <label class="row" style="font-size:12.5px"><input type="checkbox" id="solarFit" checked> Rooftop solar fitted (optional, 1,020 Wp)</label></section>
     <section class="sect"><h3>Simulation mode</h3><div class="seg" id="sims">${SIM_MODES.map(([k, n, c]) => `<button data-sim="${k}" aria-pressed="${k === 'none'}"><span class="k" style="background:${c}"></span>${n}</button>`).join('')}</div></section>
-    <section class="sect"><h3>Camera</h3><div class="seg three" id="cams">${Object.keys(CAMERAS).map((k) => `<button data-cam="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div></section>
+    <section class="sect"><h3>Camera</h3><div class="seg three" id="cams">${Object.keys(CAMERAS).map((k) => `<button data-cam="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
+      <button class="btn primary" id="walkBtn" style="width:100%;margin-top:6px">Walk inside · first person</button></section>
     <section class="sect"><div class="row"><h3 style="margin:0">Systems</h3><button class="btn" id="resetActs" style="margin-left:auto;padding:2px 8px">Follow master</button></div>
       <p class="note" style="margin:4px 0 2px">Each system can be operated on its own; "auto" means it follows the master slider.</p>
       <div class="acts" id="acts">${groups.map((g) => `<div class="grp">${g}</div>${ACTUATORS.filter((a) => a.group === g).map((a) => `<div class="act" data-id="${a.id}"><span class="n" title="${esc(a.interlock || a.name)}">${esc(a.name)}</span><input type="range" min="0" max="1" step="0.01" value="0" data-act="${a.id}" aria-label="${esc(a.name)}"><output>0%</output></div>`).join('')}`).join('')}</div></section>
@@ -780,6 +904,12 @@ function layoutHTML() {
   <div class="irscale" id="irScale" hidden><div class="subhead">Infrared · surface °C</div><div class="grad" style="background:${IRONBOW_CSS}"></div><div class="irt"><span id="irMin"></span><span id="irMid"></span><span id="irMax"></span></div><p class="note">Estimated from the live envelope model (sol-air, U-values, stratification, appliance heat) — not a measured image. Hover any surface for its temperature.</p></div>
   <div class="caption" id="caption" hidden></div>
   <div class="caption" id="timelineBox" hidden style="top:auto;bottom:104px;flex-direction:column;align-items:stretch;width:min(560px,calc(100% - 32px))"><div class="timeline" id="timeline">${tl}</div><div class="legend"><span><i style="background:#3d4f7a"></i>sleep</span><span><i style="background:#f2a33a"></i>cooking</span><span><i style="background:#a98bff"></i>work</span><span><i style="background:#3b8ff0"></i>shower</span><span><i style="background:#49c98b"></i>outside</span><span><i style="background:#8d9aab"></i>other</span></div></div>
+  <div class="tourcard" id="tourCard" hidden><div class="tc-top"><span class="eyebrow" id="tcStep"></span><button class="tc-x" id="tcClose" aria-label="End tour">×</button></div>
+    <h2 class="title" id="tcTitle"></h2><p class="prose" id="tcText"></p>
+    <div class="tc-ctl"><button class="iconbtn" id="tcPrev" aria-label="Previous stop">‹</button><button class="iconbtn" id="tcPlay" aria-label="Pause tour">❚❚</button><button class="iconbtn" id="tcNext" aria-label="Next stop">›</button><div class="tc-bar"><i id="tcBar"></i></div></div></div>
+  <div class="walkhud" id="walkHud" hidden><div class="wh-txt"><b>First person</b> · drag to look · W A S D or arrows to walk · Q / E turn · click anything to inspect</div>
+    <div class="wh-pad"><button data-pad="t1" aria-label="Turn left">⟲</button><button data-pad="f1" aria-label="Forward">▲</button><button data-pad="t-1" aria-label="Turn right">⟳</button><button data-pad="s-1" aria-label="Step left">◀</button><button data-pad="f-1" aria-label="Back">▼</button><button data-pad="s1" aria-label="Step right">▶</button></div>
+    <button class="btn" id="walkExit">Exit · Esc</button></div>
   <div class="toasts" id="toasts" aria-live="polite"></div>
   <div class="tip" id="tip" hidden></div>
   <div class="mobile-toggles"><button id="mLeft">Controls</button><button id="mRight">Data</button></div>`;

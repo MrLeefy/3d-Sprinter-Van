@@ -4,6 +4,7 @@ import { createStage, applyWeather, animatePrecip, sunDirection } from './setup.
 import { makeMaterials, applyMetricUVs } from './materials.js';
 import { setDRL } from './bodyShell.js';
 import { Infrared } from './infrared.js';
+import { Walker } from './walk.js';
 import { buildBody } from './vanBody.js';
 import { buildComponents } from './interior.js';
 import { buildSystems, Flows } from './systems.js';
@@ -52,6 +53,7 @@ export class World {
     this.modes = new Modes(this.stage, this.M, this.body, this.comps, this.systems, this.viz, this.person);
     this.ir = new Infrared(this);
     this.modes.infrared = this.ir;
+    this.walker = new Walker(this);
     this.rigBody();
     this.raycaster = new THREE.Raycaster();
     this.camTween = null;
@@ -75,13 +77,14 @@ export class World {
   }
 
   flyTo(name, dur = 1.2) {
-    const c = CAMERAS[name];
+    const c = typeof name === 'object' ? name : CAMERAS[name];
     if (!c) return;
+    if (this.walker?.on) return;
     const cam = this.stage.camera, ctl = this.stage.controls;
     const t1 = new THREE.Vector3(...c.t);
     const p1 = new THREE.Vector3(...c.p);
     // Portrait screens: back the camera off so the whole van stays in frame
-    if (cam.aspect < 1.2 && !['interior', 'galley'].includes(name)) p1.sub(t1).multiplyScalar(Math.min(2.3, 1.25 / Math.max(0.4, cam.aspect))).add(t1);
+    if (cam.aspect < 1.2 && !c.inside && !['interior', 'galley'].includes(name)) p1.sub(t1).multiplyScalar(Math.min(2.3, 1.25 / Math.max(0.4, cam.aspect))).add(t1);
     this.camTween = { t: 0, dur, p0: cam.position.clone(), t0: ctl.target.clone(), p1, t1 };
   }
 
@@ -152,7 +155,8 @@ export class World {
     if (this.modes.sim === 'living') this.person.update(dt);
     else this.person.root.visible = false;
     this.modes.tick(dt);
-    this.stage.controls.update();
+    if (this.walker.on) this.walker.update(dt);
+    else this.stage.controls.update();
     this.stage.render();
   }
 

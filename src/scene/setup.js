@@ -16,7 +16,7 @@ import { loadPBR } from './materials.js';
 export const QUALITY = {
   high: { label: 'High', dpr: 2, shadow: 4096, ao: true, bloom: true, msaa: 4, smaa: false, points: true },
   medium: { label: 'Medium', dpr: 1.5, shadow: 2048, ao: false, bloom: true, msaa: 4, smaa: false, points: true },
-  low: { label: 'Low', dpr: 1, shadow: 1024, ao: false, bloom: false, msaa: 0, smaa: true, points: false },
+  low: { label: 'Low', dpr: 1, shadow: 1024, ao: false, bloom: false, msaa: 0, smaa: true, points: true },
   lite: { label: 'Lite', dpr: 1, shadow: 0, ao: false, bloom: false, msaa: 0, smaa: false, points: false },
 };
 
@@ -287,7 +287,7 @@ export function createStage(container, { quality = autoQuality() } = {}) {
     const css = getComputedStyle(document.documentElement);
     const lw = parseFloat(css.getPropertyValue('--left-w')) || 0;
     const rw = parseFloat(css.getPropertyValue('--right-w')) || 0;
-    if (w > 900) camera.setViewOffset(w, h, (rw - lw) / 2, 22, w, h);
+    if (w > 900 && !stage.fullView) camera.setViewOffset(w, h, (rw - lw) / 2, 22, w, h);
     else camera.clearViewOffset();
     camera.updateProjectionMatrix();
     if (composer) {

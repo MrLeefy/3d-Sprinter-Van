@@ -28,26 +28,31 @@ export const QUALITY_LAND = {
   lite: { near: 2, far: 1, veg: 0.25, grass: 0.25 },
 };
 
-// Rolling resistance (crr) and grip (mu) of every surface the drive model can meet
+// Rolling resistance (crr) and grip (mu) of every surface the drive model can meet. mu is the peak
+// friction coefficient of a road tyre: dry tarmac gives a loaded van a bit over 1 g, wet tarmac about
+// 0.8 (see WET_GRIP), loose ground well under that, snow and ice very little.
 export const SURFACES = {
-  asphalt: { label: 'Highway', crr: 0.012, mu: 0.85 },
-  county: { label: 'County road', crr: 0.014, mu: 0.8 },
-  street: { label: 'Street', crr: 0.014, mu: 0.8 },
-  gravel: { label: 'Gravel road', crr: 0.03, mu: 0.55 },
-  dirt: { label: 'Two-track', crr: 0.04, mu: 0.5 },
-  grass: { label: 'Grass', crr: 0.045, mu: 0.55 },
-  forest: { label: 'Forest floor', crr: 0.06, mu: 0.5 },
-  sand: { label: 'Dry clay', crr: 0.05, mu: 0.5 },
-  rock: { label: 'Rock', crr: 0.05, mu: 0.7 },
-  mud: { label: 'Mud', crr: 0.065, mu: 0.38 },
+  asphalt: { label: 'Highway', crr: 0.012, mu: 1.05 },
+  county: { label: 'County road', crr: 0.014, mu: 1.0 },
+  street: { label: 'Street', crr: 0.014, mu: 1.0 },
+  gravel: { label: 'Gravel road', crr: 0.03, mu: 0.72 },
+  dirt: { label: 'Two-track', crr: 0.04, mu: 0.68 },
+  grass: { label: 'Grass', crr: 0.045, mu: 0.7 },
+  forest: { label: 'Forest floor', crr: 0.06, mu: 0.62 },
+  sand: { label: 'Dry clay', crr: 0.05, mu: 0.62 },
+  rock: { label: 'Rock', crr: 0.05, mu: 0.9 },
+  mud: { label: 'Mud', crr: 0.065, mu: 0.45 },
   snow: { label: 'Snow', crr: 0.04, mu: 0.3 },
   packed: { label: 'Packed snow', crr: 0.025, mu: 0.36 },
   plowed: { label: 'Snowy highway', crr: 0.016, mu: 0.5 },
   ice: { label: 'Lake ice', crr: 0.012, mu: 0.12 },
-  arrester: { label: 'Runaway ramp bed', crr: 0.2, mu: 0.6 },
-  shallow: { label: 'Shallow water', crr: 0.12, mu: 0.45 },
+  arrester: { label: 'Runaway ramp bed', crr: 0.2, mu: 0.7 },
+  shallow: { label: 'Shallow water', crr: 0.12, mu: 0.55 },
   water: { label: 'Deep water', crr: 0.3, mu: 0.1 },
 };
+/** Share of the dry grip a rain-soaked paved road keeps, and the grip of wet gravel. */
+export const WET_GRIP = 0.78;
+const WET_GRAVEL_MU = 0.55;
 
 const mkIndex = (seg) => {
   const nv = seg + 1, idx = [];
@@ -252,12 +257,12 @@ export class Land {
     }
     if (w.kind === 'road') {
       if (w.lot === 'runaway') return out('arrester');
-      if (w.cls === 'interstate' || w.cls === 'highway') return out(snowy ? 'plowed' : 'asphalt', wet ? { mu: SURFACES.asphalt.mu * 0.72 } : {});
-      if (w.cls === 'county') return out(snowy ? 'packed' : 'county', wet && !snowy ? { mu: SURFACES.county.mu * 0.72 } : {});
-      if (w.cls === 'gravel') return out(snowy ? 'packed' : wet ? 'mud' : 'gravel', wet && !snowy ? { mu: 0.45 } : {});
+      if (w.cls === 'interstate' || w.cls === 'highway') return out(snowy ? 'plowed' : 'asphalt', wet && !snowy ? { mu: SURFACES.asphalt.mu * WET_GRIP } : {});
+      if (w.cls === 'county') return out(snowy ? 'packed' : 'county', wet && !snowy ? { mu: SURFACES.county.mu * WET_GRIP } : {});
+      if (w.cls === 'gravel') return out(snowy ? 'packed' : wet ? 'mud' : 'gravel', wet && !snowy ? { mu: WET_GRAVEL_MU } : {});
       return out(snowy ? 'snow' : wet ? 'mud' : 'dirt');
     }
-    if (w.kind === 'street') return out(snowy ? 'packed' : 'street', wet && !snowy ? { mu: SURFACES.street.mu * 0.72 } : {});
+    if (w.kind === 'street') return out(snowy ? 'packed' : 'street', wet && !snowy ? { mu: SURFACES.street.mu * WET_GRIP } : {});
     const b = this.world.biome(x, z, w.h, this._bio || (this._bio = {}));
     if (snowy) return out('snow');
     if (wet) return out('mud');

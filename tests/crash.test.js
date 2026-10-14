@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  makeBody, staticBody, resolveImpact, chainContact, circleRectContact, impactZone, BodyDamage, damageAmount, stepCrashMotion, stepFree,
-  rolloverSpeed, shouldDetach, inertia, DAMAGE_J,
+  makeBody, staticBody, resolveImpact, chainContact, circleRectContact, impactZone, BodyDamage, damageAmount, stepFree,
+  shouldDetach, inertia, DAMAGE_J,
 } from '../src/sim/crash.js';
 
 const van = (o = {}) => makeBody({ m: 3800, I: inertia(3800, 5.9, 2), ...o });
@@ -107,36 +107,6 @@ test('damage: zones, accumulation, power loss, steering pull and the engine givi
   assert.ok(DAMAGE_J > 1e5);
 });
 
-test('spin-out: a yaw kick turns the body under its momentum, the tyres pull the slide out and the spin dies', () => {
-  const st = { v: 20, vy: 0, wc: 2.5, yaw: 0 };
-  const speed0 = Math.hypot(st.v, st.vy);
-  stepCrashMotion(st, 0.01, 0.85);
-  assert.ok(st.vy > 0, 'nose swung left, so the velocity now points to the right of the body');
-  assert.ok(st.yaw > 0);
-  let maxSlip = 0, steps = 0;
-  while ((Math.abs(st.vy) > 0 || Math.abs(st.wc) > 0) && steps++ < 4000) {
-    stepCrashMotion(st, 0.01, 0.85);
-    maxSlip = Math.max(maxSlip, Math.abs(st.vy));
-  }
-  assert.ok(steps < 4000, 'comes to a stop eventually');
-  assert.ok(maxSlip > 2, `slid sideways at up to ${maxSlip.toFixed(1)} m/s`);
-  assert.ok(Math.abs(st.yaw) > 0.5, 'ended up rotated');
-  void speed0;
-});
-
-test('spin-out: grip decides how long the slide lasts (ice is far longer than tarmac)', () => {
-  const time = (mu) => {
-    const st = { v: 15, vy: 8, wc: 0, yaw: 0 };
-    let t = 0;
-    while (Math.abs(st.vy) > 0 && t < 60) {
-      stepCrashMotion(st, 0.01, mu);
-      t += 0.01;
-    }
-    return t;
-  };
-  assert.ok(time(0.12) > time(0.85) * 4);
-});
-
 test('free bodies: a spinning wreck slides, scrubs speed sideways first and comes to rest', () => {
   const b = { x: 0, z: 0, yaw: 0, vx: 18, vz: 6, w: 3 };
   const e0 = Math.hypot(b.vx, b.vz);
@@ -156,12 +126,6 @@ test('free bodies: a spinning wreck slides, scrubs speed sideways first and come
     stepFree(f, 0.02, {});
   }
   assert.ok(Math.abs(s.vz) < Math.abs(f.vx));
-});
-
-test('rollover: the sideways speed that trips a van depends on what the tyres can dig into', () => {
-  const ice = rolloverSpeed('ice'), tar = rolloverSpeed('asphalt'), grass = rolloverSpeed('grass'), mud = rolloverSpeed('mud');
-  assert.ok(ice > tar && tar > grass && grass > mud);
-  assert.ok(grass > 3 && tar < 9, `tarmac ${tar.toFixed(1)} m/s, grass ${grass.toFixed(1)} m/s`);
 });
 
 test('detaching an AI vehicle from its path takes a real hit, a big sideways shove or a spin', () => {

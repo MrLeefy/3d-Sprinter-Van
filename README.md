@@ -128,12 +128,25 @@ harmonic firing pulse behind low-pass filters and a cabin filter that closes fur
 cockpit view, with a faint intake whoosh and a damped clatter — instead of the old buzzy
 saw-and-square synth.
 
+### Handling
+
+The van is driven by a real tyre-and-chassis model (`src/sim/vehicle.js`): tyres that grip about
+1 g on dry tarmac (0.8 wet, 0.7 on gravel and grass, 0.3 on snow, 0.12 on ice), weight that shifts
+under braking and cornering, a rear-heavy body that understeers into a corner, and a tall body that
+rolls. Braking from 100 km/h takes about 43 m on a dry road, 55 m on a wet one. Steering follows the
+speed: full stick gives a tight turn in town and a firm but sane lane change at motorway speed, and
+corners are held at well over 0.6 g on a good road. The driving-assist setting decides how much room you
+get to make mistakes: **Easy** (ABS, traction, stability and roll-over control) never tips; **Standard**
+lets a long, hard turn at over 100 km/h put two wheels in the air and roll the van, and **Pro** has no aids
+at all, so a hard zig-zag at 100 km/h, a panic stab at the wheel at speed or a slide that digs into grass
+rolls it. Slippery ground slides instead. The warning is a *Tipping!* message as the inner wheels lift.
+
 ### Crashes
 
 Impacts are solved as 2-D rigid-body collisions (restitution, scuff friction, yaw spin), so *where*
 and *how fast* you hit decides what happens: a head-on hit stops the van, a hit on one corner
-swings the nose round into a spin-out, a glancing blow scrapes speed off along a wall, and
-sliding sideways on soft ground can trip the van onto its side. Damage builds by zone (front,
+swings the nose round into a spin-out, a glancing blow scrapes speed off along a wall, a hard hit from
+the side can tip the van, and sliding sideways at speed can trip it onto its side. Damage builds by zone (front,
 rear, left, right) on the new **Damage** meter: a crushed front costs power, pulls the steering
 and finally stops the engine (steam, then black smoke, from the hood); side damage adds rolling
 resistance. Hits throw sparks, glass and debris and shake the camera. Easy mode forgives, Pro does not.

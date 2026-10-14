@@ -260,28 +260,31 @@ temperatures. It is an estimate for explanation, not a measured image:
 
 ### Drive model (visual demonstration)
 
-`src/scene/drive.js` is a kinematic bicycle model (rear-axle reference, 4.325 m wheelbase,
-29° maximum road-wheel angle ≈ 15.6 m turning circle) with longitudinal dynamics:
+`src/scene/drive.js` runs the van on the dynamic handling model in `src/sim/vehicle.js` (below) with
+longitudinal dynamics sized from the van itself:
 
 - **Mass:** the laden mass from the weight model (≈ 3,770 kg).
 - **Drive:** 125 kW at the wheels (2.0 L diesel), 9.8 kN first-gear limit, rear-wheel drive
   with ≈ 62 % of the weight on the driven axle, so traction is μ · m · g · 0.62.
 - **Resistance:** rolling resistance by surface (track 0.016, grass 0.045, sand 0.07, mud
   0.06, snow 0.035, ice 0.012) plus aero drag with Cd·A = 0.37 × 4.6 m² and the grade force.
-- **Grip:** braking and cornering are limited by μ (track 0.8, wet track 0.6, grass 0.55,
-  sand 0.5, mud 0.4, packed snow 0.38, snow 0.3, ice 0.12), with an understeer gradient.
-  Climbing a grade steeper than the grip allows causes wheelspin. The van refuses water
-  deeper than about 0.6 m.
+- **Grip:** the peak friction coefficient μ of the surface under the front axle (`SURFACES` in
+  `land.js`): dry tarmac 1.05, county road and street 1.0, wet paved roads ×0.78 (≈ 0.82), rock 0.9,
+  gravel 0.72, grass 0.70, two-track 0.68, forest floor and dry clay 0.62, shallow water 0.55,
+  snowy highway 0.5, mud 0.45, packed snow 0.36, snow 0.3, lake ice 0.12. Climbing a grade steeper than
+  the grip allows causes wheelspin. The van refuses water deeper than about 0.6 m.
 - **Energy:** while the engine runs, the simulation charges the house bank from the two
   50 A DC-DC chargers and burns fuel at 0.9 L/h idle plus a speed term (≈ 12 L/100 km at
   70–100 km/h). Because settlements in the drive world are about 2 km apart instead of about
   60 km, the drive-mode fuel burn is scaled ×14 (`ctrl.driveFuelScale`) so that a tank lasts
   roughly half an hour of highway driving and refuelling at a pump is part of the game.
 - **Driver aids** (`ASSISTS`): *Easy* adds lane keeping (heading, lane-offset and a 1.3 s
-  curvature preview converted to a road-wheel angle through the inverse bicycle model),
-  traction control (torque capped at μ·m·g·0.62), stability control (lower yaw-rate cap),
-  soft pedal ramps and a curve-speed advisory (v ≤ √(0.42·μ·g/κ)); *Standard* has
-  speed-sensitive steering and partial traction control; *Pro* is the raw model.
+  curvature preview converted to a road-wheel angle through the inverse steady-state response),
+  ABS, traction control, stability control (a corrective yaw moment), the roll-over guard, soft pedal
+  ramps and a curve-speed advisory: it scans the next 170 m of road and eases off so that the tightest
+  bend (a = 0.3·μ·g) can be reached braking at 0.22·μ·g; *Standard* has ABS, partial traction and
+  stability control, a light roll-over guard and a steering lock that lets a hard swerve at motorway speed
+  roll the van; *Pro* has none of them (locking brakes, a handbrake that locks the rear wheels).
   Cruise control is a PI loop with light braking on long descents; the limiter holds the
   posted limit (interstate 80 mph, highway 65, county 55, gravel 35, track 20, streets 25).
 - **Powertrain** (`src/sim/powertrain.js`): a drive-mode tune of 225 kW at the wheels (the stock
@@ -294,15 +297,51 @@ temperatures. It is an estimate for explanation, not a measured image:
   props, traffic footprints and animals. Each contact is an impulse
   j = −(1 + e)·vₙ / (1/mₐ + 1/m_b + (rₐ×n)²/Iₐ + (r_b×n)²/I_b) at the contact point, followed by Coulomb
   friction along the surface, so an off-centre hit also gives yaw. The model tracks the rear axle
-  but resolves impacts about the centre of mass (1.9 m ahead). After an impact the body turns under
-  its momentum (sideslip vy and extra yaw rate), and the tyres pull the slide out at 0.9·μ·g.
+  but resolves impacts about the centre of mass (1.73 m ahead). The impact leaves the van with a new
+  speed, sideways speed and yaw rate and the handling model takes over: the body turns under its
+  momentum and the tyres pull the slide out (or not, on ice). A hard shove from the side also gives the
+  roof a roll impulse (`kickRoll`).
   Absorbed energy ½(1 − e²)vₙ²/(…) becomes zone damage (520 kJ wrecks a zone; a 50 km/h wall hit is
   ≈ 360 kJ). Front damage ≥ 0.25 starts to cost power (up to −65 %), ≥ 0.97 stops the engine;
   front-corner hits bend the steering (up to 0.07 rad of pull); side damage adds rolling resistance;
-  repair cost is $1,100 / $650 / $800 / $800 per full front / rear / left / right zone. A van tips
-  over when its sideways speed exceeds √(2·g·(√((t/2)² + h²) − h)/0.33) scaled for the ground
-  (about 4 m/s on grass, 6 m/s on tarmac, never on ice). Surfaces add shake: 0.75 m corrugations on
-  gravel, ruts on tracks, tussocks on grass.
+  repair cost is $1,100 / $650 / $800 / $800 per full front / rear / left / right zone. Surfaces add
+  shake: 0.75 m corrugations on gravel, ruts on tracks, tussocks on grass.
+- **Handling model** (`src/sim/vehicle.js`, pure, ~300 lines, `tests/vehicle.test.js`): a dynamic
+  single-track ("bicycle") model with forward speed, sideways speed and yaw rate of the centre of mass,
+  advanced at 100–200 Hz.
+  - *Chassis:* 3,770 kg, wheelbase 4.325 m, centre of mass 1.73 m ahead of the rear axle (this build is
+    rear-heavy: 40 % of the weight on the front axle) and 1.18 m high (roof boxes and a full fridge),
+    track 1.72 m, yaw inertia 3.3·m (radius of gyration 1.8 m).
+  - *Tyres:* one brush-model tyre per axle: lateral force F = μFz(3z − 3z² + z³) with
+    z = Cα·tan α / (3μFz), falling to 0.9 of the peak when sliding, sharing the friction circle with
+    braking and driving. Cornering stiffness is 12 (front) and 15 (rear) per unit static axle load, so
+    the van understeers (gradient 0.0017 rad per m/s², about 0.1° per 0.1 g), and the front also gives up
+    first when braking and steering together (front friction factor 0.94, brake-force distribution that
+    keeps the rear below the front). Soft surfaces change the stiffness, slide share and "dig": soil
+    piling up against a tyre ploughing sideways at over 1.5 m/s adds up to 60 % more lateral force,
+    which is what trips a van that slides on grass or sand.
+  - *Load transfer:* longitudinal from the measured acceleration (axle loads, braking and traction
+    limits), lateral as λ = (m·ay·h + roll moment)/(m·g·t/2); the grip falls by 12 %·λ² as the inner
+    wheels unload. The sprung mass rolls on 260 kN·m/rad springs and 19 kN·m·s/rad dampers up to a bump
+    stop (about 4° at 0.7 g).
+  - *Tipping:* a rigid van starts to tip at ay = g·(t/2)/h = 7.15 m/s² (0.73 g). Once λ ≥ 1 the inner
+    wheels leave the ground and the van rotates about its outer wheels; it falls back if the lateral
+    force lets go in time and rolls onto its side past atan((t/2)/h) = 36°. That takes either a long
+    enough hard turn, a quick left-right sequence that rocks it, or a sideways slide that digs in.
+  - *Steering lock* (`steerLock`): the wheels turn at up to 1.7 rad/s and the lock is 0.5 rad at parking
+    speeds, then narrows so that full stick asks for a fixed share of the tipping acceleration:
+    0.8·7.15 m/s² (0.58 g) up to 61 km/h and, opening up between 61 and 100 km/h, a cap of 0.85 (Easy,
+    never tips), 1.4 (Standard) or 2.2 (Pro) times it. So full stick at 108 km/h is 0.04 / 0.065 / 0.10 rad (Easy / Standard / Pro).
+    Keyboard steering ramps in at 2.4/s and back at 5.5/s.
+  - *Aids:* ABS (the slip held at 0.93 of the peak, less when also cornering), traction control,
+    stability control (a yaw moment against the difference between steered and actual yaw rate) and the
+    roll-over guard (brakes and cuts torque as the inner wheels unload). Without ABS the tyres lock
+    (friction at 0.9 of the sliding value).
+  - *Measured:* 100 km/h to a stop in 43 m on dry tarmac with ABS (47 m locked), 55 m wet, 61 m on
+    gravel, 131 m on snow; steady turns to 0.7 g without sliding; holding full lock for 1.5 s or more
+    at over 100 km/h with Standard (or over 90 km/h with Pro), or a 1.2 s left-right zig-zag at 108 km/h
+    with Pro, rolls the van; Easy never does. On wet tarmac, snow and ice the grip goes first and the
+    van slides instead.
 - **Traffic collisions**: AI vehicles on their lane follow the road polyline; one that is hit
   with a closing speed over 4.5 m/s, a sideways shove over 2.4 m/s, or a spin over 0.45 rad/s
   (or that is badly damaged) becomes a free body that slides under anisotropic tyre friction (grip

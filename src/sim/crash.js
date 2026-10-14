@@ -1,6 +1,7 @@
 // Crash physics (pure, no rendering): 2-D rigid-body impacts between chains of circles (vehicle
 // footprints) and static obstacles, with restitution, tyre-scuff friction, yaw spin from off-centre
-// hits, sideslip and spin-out after an impact, a body-damage model, and rollover tripping.
+// hits, a body-damage model and free wrecks. What the van does afterwards (sliding, spinning, tipping
+// over) is the vehicle model's job (vehicle.js).
 //
 // Conventions match the driving world: x east, z south, heading θ has direction (cos θ, −sin θ),
 // right = (sin θ, cos θ). A positive yaw rate ω turns the heading toward north (counter-clockwise from
@@ -208,45 +209,6 @@ export class BodyDamage {
 
 /** Damage amount (0..1 of a zone) from absorbed energy. `share` is the part of it this body keeps. */
 export const damageAmount = (energy, share = 1) => clamp((energy * share) / DAMAGE_J, 0, 1);
-
-// ── Motion after impact ───────────────────────────────────────────────────────
-/**
- * Sideslip and spin-out for a bicycle-model vehicle. st = { v (forward m/s), vy (m/s to the right),
- * wc (extra yaw rate, rad/s), yaw }. The spin turns the body under its momentum, so velocity
- * rotates into sideslip; the tyres then pull the slide out and damp the spin. mu is the surface grip.
- * Returns the lateral deceleration the tyres supplied (m/s²), for skid sounds and marks.
- */
-export function stepCrashMotion(st, h, mu) {
-  const dpsi = st.wc * h;
-  if (dpsi !== 0) {
-    const c = Math.cos(dpsi), s = Math.sin(dpsi);
-    const v = st.v, vy = st.vy;
-    st.v = v * c - vy * s;
-    st.vy = vy * c + v * s;
-    st.yaw += dpsi;
-  }
-  const aMax = mu * G * 0.9;
-  const dv = Math.min(Math.abs(st.vy), aMax * h);
-  st.vy -= Math.sign(st.vy) * dv;
-  st.wc *= Math.exp(-(1.3 + 0.28 * Math.abs(st.vy) + 0.04 * Math.abs(st.v)) * mu * 1.4 * h);
-  if (Math.abs(st.vy) < 0.04 && Math.abs(st.wc) < 0.015) {
-    st.vy = 0;
-    st.wc = 0;
-  }
-  return dv / h;
-}
-
-/**
- * Sideways speed (m/s) above which a tall van trips over its own tyres on this surface (soft ground
- * and kerbs dig in; ice and wet tarmac let it slide). The energy needed to lift the centre of gravity
- * over the wheel line is m·g·(√((t/2)² + h²) − h), and about a third of the sideways energy goes there.
- */
-export function rolloverSpeed(surfaceKey, track = 1.73, cgHeight = 1.25) {
-  const lift = G * (Math.hypot(track / 2, cgHeight) - cgHeight);
-  const base = Math.sqrt((2 * lift) / 0.33); // ≈ 4 m/s
-  const dig = { ice: 99, asphalt: 1.9, county: 1.9, street: 1.9, plowed: 1.7, gravel: 1.45, dirt: 1.3, packed: 1.4, grass: 1.25, forest: 1.2, sand: 1.2, snow: 1.2, mud: 1.1, rock: 1.4, shallow: 1.6 }[surfaceKey] ?? 1.5;
-  return base * dig * 0.82;
-}
 
 // ── Free bodies (wrecks) ──────────────────────────────────────────────────────
 /**

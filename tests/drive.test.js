@@ -97,25 +97,27 @@ test('van: Easy mode forgives, Pro does not (same crash, different damage)', () 
   assert.ok(easy < std && std < pro, `easy ${easy} < standard ${std} < pro ${pro}`);
 });
 
-test('van: sliding sideways trips it over on soft ground at a speed that a tarmac slide survives; it then needs a tow', () => {
-  const grass = flat({ surface: 'grass' });
-  grass.D.v = 18;
-  grass.D.vy = 8;
-  run(grass, 0.3);
-  assert.ok(grass.D.rolledVan, 'rolled on grass');
-  assert.ok(grass.D.log.includes('rollover') && grass.D.engineOut);
-  run(grass, 3);
-  assert.ok(Math.abs(grass.D.v) < 0.5, 'comes to rest on its side');
-  grass.D.keys.add('w');
-  const x0 = grass.D.x;
-  run(grass, 2);
-  assert.ok(Math.abs(grass.D.x - x0) < 0.5, 'no driving while on its side');
-  const tar = flat({ surface: 'asphalt' });
-  tar.D.v = 18;
-  tar.D.vy = 4.5;
-  run(tar, 3);
-  assert.ok(!tar.D.rolledVan, 'a 4.5 m/s slide on tarmac is survivable');
-  assert.ok(Math.abs(tar.D.vy) < 0.05, 'the tyres pull the slide out');
+test('van: sliding sideways at speed trips it over on tarmac and soft ground, not on ice; it then needs a tow', () => {
+  const slide = (surface, v, vy, secs = 4) => {
+    const g = flat({ surface });
+    g.D.v = v;
+    g.D.vy = vy;
+    run(g, secs);
+    return g;
+  };
+  const tar = slide('asphalt', 18, 8);
+  assert.ok(tar.D.rolledVan, 'rolled on tarmac');
+  assert.ok(tar.D.log.includes('rollover') && tar.D.engineOut);
+  assert.ok(Math.abs(tar.D.v) < 0.5, 'comes to rest on its side');
+  tar.D.keys.add('w');
+  const x0 = tar.D.x;
+  run(tar, 2);
+  assert.ok(Math.abs(tar.D.x - x0) < 0.5, 'no driving while on its side');
+  assert.ok(slide('grass', 18, 11).D.rolledVan, 'rolled on grass');
+  const mild = slide('asphalt', 18, 4.5);
+  assert.ok(!mild.D.rolledVan, 'a 4.5 m/s slide on tarmac is survivable');
+  assert.ok(Math.abs(mild.D.vy) < 0.05, 'the tyres pull the slide out');
+  assert.ok(!slide('ice', 18, 11).D.rolledVan, 'ice lets it slide');
 });
 
 test('van: the tow truck stands a rolled van up, repairs it and charges for it', () => {
@@ -159,16 +161,51 @@ test('van: damage costs power, and a crushed radiator slows the climb', () => {
 });
 
 test('van: after a spin the body is turned under its momentum, so the van slides before the tyres bite', () => {
-  const g = flat();
+  const g = flat({ surface: 'grass' });
   g.D.v = 20;
-  g.D.wc = 2.5; // an impact has just kicked its yaw
+  g.D.yawRate = 1.8; // an impact has just kicked its yaw
   let maxSlip = 0;
-  for (let i = 0; i < 300; i++) {
+  for (let i = 0; i < 400; i++) {
     tick(g, 1 / 100, false);
     maxSlip = Math.max(maxSlip, Math.abs(g.D.vy));
   }
   assert.ok(maxSlip > 3, `slid sideways at ${maxSlip} m/s`);
   assert.ok(Math.abs(g.D.yaw) > 0.3, 'ended up pointing somewhere else');
   assert.ok(Math.hypot(g.D.x, g.D.z) > 20, 'and carried on in roughly the old direction');
+});
+
+test('van: handling through the real driver — a lane change at 110 km/h is clean, a held full-lock stab at that speed rolls Standard but not Easy', () => {
+  const steer = (assist, v, keys, secs) => {
+    const g = flat();
+    g.D.cfg.assist = assist;
+    g.D.v = v;
+    g.D.cruise.on = true;
+    g.D.cruise.v = v;
+    const key = { left: 'a', right: 'd' };
+    let t = 0, maxPhi = 0, maxLat = 0;
+    while (t < secs) {
+      const k = keys(t);
+      g.D.keys.clear();
+      if (k) g.D.keys.add(k > 0 ? key.left : key.right);
+      tick(g, 1 / 100, false);
+      t += 1 / 100;
+      maxPhi = Math.max(maxPhi, Math.abs(g.D.vd.phi));
+      maxLat = Math.max(maxLat, Math.abs(g.D.z));
+    }
+    return { g, maxPhi, maxLat };
+  };
+  const lane = (t) => (t < 0.4 ? 1 : t < 0.6 ? 0 : t < 1.0 ? -1 : 0);
+  for (const assist of ['easy', 'standard', 'pro']) {
+    const r = steer(assist, 30, lane, 5);
+    assert.ok(!r.g.D.rolledVan, `${assist} lane change`);
+    assert.ok(r.maxLat > 0.5, `${assist} actually moved over (${r.maxLat.toFixed(1)} m)`);
+    assert.ok(Math.abs(r.g.D.vy) < 1.5 && Math.abs(r.g.D.yawRate) < 0.1, 'and settled');
+  }
+  const stab = (t) => (t < 2 ? 1 : 0);
+  assert.ok(steer('standard', 32, stab, 6).g.D.rolledVan, 'Standard rolls');
+  assert.ok(steer('pro', 32, stab, 6).g.D.rolledVan, 'Pro rolls');
+  assert.ok(!steer('easy', 32, stab, 6).g.D.rolledVan, 'Easy stays up');
+  const slow = steer('pro', 9, stab, 5);
+  assert.ok(!slow.g.D.rolledVan, 'at 30 km/h even Pro just drives in circles');
 });
 

@@ -19,9 +19,9 @@ const DEFAULTS = () => ({
   vehicle: 'camper', trailer: 'dryvan', cargoPct: 0.6, manual: false,
 });
 const ASSIST_TEXT = {
-  easy: 'Lane keeping, traction and stability control, soft pedals. Hard to get into trouble.',
-  standard: 'Speed-sensitive steering and traction control. You hold your own lane.',
-  pro: 'Raw physics: no aids, quick pedals, loose ground really is loose.',
+  easy: 'Lane keeping, ABS, traction, stability and roll-over control, soft pedals. Hard to get into trouble.',
+  standard: 'ABS, traction control and speed-sensitive steering. You hold your own lane, and a hard swerve at motorway speed can still roll the van.',
+  pro: 'Raw physics: no aids, quick pedals, locking brakes. Loose ground really is loose, and a tall van rolls if you throw it about at speed.',
 };
 const TRAILER_NAMES = { none: 'Bobtail', dryvan: 'Dry van', reefer: 'Reefer', flatbed: 'Flatbed', tanker: 'Tanker', logs: 'Log trailer', container: 'Container' };
 const cargoKg = (trailer, pct) => {
@@ -336,7 +336,7 @@ export class DriveUI {
       deep: 'Too deep to ford: the van stops before the water reaches the sills (≈ 0.6 m).', slide: 'Sliding — not enough grip for that speed on this surface.',
       stuck: 'Wheelspin — this rear-wheel-drive van cannot climb that slope on this surface. Back down and take the track, or press T to get back on the road.',
       animal: 'Thump — you hit a wildlife. The van is dented but drivable; repairs cost cash. Slow down at dusk and watch the road edges.', crash: 'Crunch — you hit another vehicle. Keep your distance and use the horn.', reset: `Back on the road${this.D.road ? ` — ${this.D.road.edge.name}` : ''}.`, noRoad: 'No road within 1.4 km — try the map and drive toward a town.', cruiseLow: 'Cruise control needs a little speed first.', curve: 'Curve ahead — easing off the throttle.',
-      jackknife: 'Jack-knife! Ease off and straighten the wheel — never brake hard while the trailer is folding.', tipping: 'Tipping! Slow down — a loaded trailer rolls in a fast turn.', recovered: 'Recovery crew has stood the rig back up on the road.', rollover: this.D.vehicle === 'semi' ? 'Rolled over. Press T to get the rig upright back on the road (it costs a recovery fee).' : 'Rolled onto its side! Press T to call a tow truck — it stands the van up, repairs it and puts it back on the road for a fee.',
+      jackknife: 'Jack-knife! Ease off and straighten the wheel — never brake hard while the trailer is folding.', tipping: this.D.vehicle === 'semi' ? 'Tipping! Slow down — a loaded trailer rolls in a fast turn.' : 'Two wheels are lifting! Straighten the wheel and ease off — a tall van rolls over if you swerve hard at speed.', recovered: 'Recovery crew has stood the rig back up on the road.', rollover: this.D.vehicle === 'semi' ? 'Rolled over. Press T to get the rig upright back on the road (it costs a recovery fee).' : 'Rolled onto its side! Press T to call a tow truck — it stands the van up, repairs it and puts it back on the road for a fee.',
       engineout: 'The engine bay is crushed and the engine has died. Press T to call a tow and repair (it costs cash).', overheat: 'Radiator damage — steam from the hood and less power. Find a station with a garage (⛽) to repair, or keep the speed down.',
       towed: `Tow truck: van repaired and back on the road for ${money(250 + (this.D.towCost || 0))}.`,
     }[kind];

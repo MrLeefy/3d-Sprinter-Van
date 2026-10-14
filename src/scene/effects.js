@@ -24,6 +24,12 @@ const EMIT = {
   water: { col: lin([0.8, 0.88, 0.95]), rate: 120, life: [0.8, 1.5], s0: 0.6, s1: 3, a: 0.55, up: [1.4, 3.8], drag: 0.7, g: 5 },
   mist: { col: lin([0.75, 0.78, 0.82]), rate: 40, life: [0.8, 1.5], s0: 0.8, s1: 3.2, a: 0.22, up: [0.3, 1.2], drag: 1.2, g: -0.3 },
   smoke: { col: lin([0.62, 0.62, 0.64]), rate: 70, life: [0.9, 1.7], s0: 0.5, s1: 2.6, a: 0.34, up: [0.3, 1.0], drag: 1.2, g: -0.5 },
+  // crashes: sparks and fragments (heavy, short-lived), steam and black smoke from a wrecked engine bay
+  spark: { col: [1, 0.62, 0.22], rate: 0, life: [0.18, 0.5], s0: 0.09, s1: 0.04, a: 1, up: [1.5, 4.5], drag: 0.5, g: 9 },
+  debris: { col: lin([0.12, 0.12, 0.13]), rate: 0, life: [0.5, 1.1], s0: 0.16, s1: 0.12, a: 0.95, up: [1.5, 5], drag: 0.4, g: 9.5 },
+  glass: { col: lin([0.8, 0.9, 0.95]), rate: 0, life: [0.4, 0.9], s0: 0.1, s1: 0.07, a: 0.9, up: [1.5, 4.5], drag: 0.5, g: 9 },
+  steam: { col: lin([0.9, 0.92, 0.95]), rate: 0, life: [1.1, 2.0], s0: 0.35, s1: 2.2, a: 0.4, up: [0.9, 2.0], drag: 1.2, g: -0.8 },
+  blacksmoke: { col: lin([0.05, 0.05, 0.055]), rate: 0, life: [1.4, 2.6], s0: 0.5, s1: 3.2, a: 0.5, up: [1.0, 2.2], drag: 1.1, g: -0.9 },
 };
 const HARD = new Set(['asphalt', 'county', 'street', 'plowed']);
 // wheel mark colours and base alpha when the wheel just rolls (ruts) vs. slides (skids)
@@ -117,6 +123,48 @@ export class Effects {
     this.col.set(e.col, i * 3);
   }
 
+  /** Impact burst at a point: sparks, fragments, glass and a puff of dust, thrown out along the contact normal. */
+  crash(x, y, z, closing, nx = 0, nz = 0) {
+    if (!this.visible || closing < 1.5) return;
+    const n = Math.min(46, Math.round(6 + closing * 2.2));
+    const burst = (kind, count, speed, lift = 1) => {
+      const e = EMIT[kind];
+      for (let i = 0; i < count; i++) {
+        const a = Math.random() * Math.PI * 2, r = speed * rnd(0.3, 1);
+        this.spawn(x, y + 0.6, z, nx * r * 0.7 + Math.cos(a) * r * 0.6, e.up[0] * lift + Math.random() * (e.up[1] - e.up[0]) * lift, nz * r * 0.7 + Math.sin(a) * r * 0.6, e, 1);
+      }
+    };
+    if (closing > 3) burst('spark', Math.round(n * 0.7), 3 + closing * 0.5);
+    burst('debris', Math.round(n * 0.4), 2 + closing * 0.3);
+    if (closing > 7) burst('glass', Math.round(n * 0.5), 3 + closing * 0.3);
+    for (let i = 0; i < Math.min(8, 2 + Math.round(closing * 0.4)); i++) this.spawn(x + rnd(-0.5, 0.5), y + 0.4, z + rnd(-0.5, 0.5), nx * rnd(0.3, 1.5) + rnd(-0.6, 0.6), rnd(0.4, 1.4), nz * rnd(0.3, 1.5) + rnd(-0.6, 0.6), EMIT.smoke, 0.8 + closing * 0.04);
+  }
+
+  /** One puff of steam or black smoke from a wrecked vehicle (amount 0..1 of its damage). */
+  smokeAt(x, y, z, amount = 0.5) {
+    if (!this.visible) return;
+    const kind = amount > 0.7 && Math.random() < 0.5 ? 'blacksmoke' : 'steam';
+    this.spawn(x, y, z, rnd(-0.4, 0.4), 0, rnd(-0.4, 0.4), EMIT[kind], 0.8 + amount * 0.6);
+  }
+
+  /** Steam, then black smoke, from a damaged engine bay (the van's hood is 3.4 m ahead of the rear axle). */
+  hoodSmoke(dt, D) {
+    const sm = D.dmg ? D.dmg.smoke : 0;
+    if (!sm || D.vehicle === 'semi') {
+      this.hoodAcc = 0;
+      return;
+    }
+    this.hoodAcc = (this.hoodAcc || 0) + dt * (4 + sm * 26);
+    const c = Math.cos(D.yaw), s = Math.sin(D.yaw);
+    while (this.hoodAcc >= 1) {
+      this.hoodAcc -= 1;
+      const lz = rnd(-0.5, 0.5);
+      const px = D.x + 3.5 * c + lz * s, pz = D.z - 3.5 * s + lz * c;
+      const kind = D.dmg.zone.front > 0.8 && Math.random() < 0.5 ? 'blacksmoke' : 'steam';
+      this.spawn(px, this.world.terrain.heightAt(px, pz) + 1.35, pz, -c * Math.abs(D.v) * 0.25 + rnd(-0.3, 0.3), 0, s * Math.abs(D.v) * 0.25 + rnd(-0.3, 0.3), EMIT[kind], 0.9);
+    }
+  }
+
   /** Four wheel contact points in world coordinates. */
   wheels(D) {
     const c = Math.cos(D.yaw), s = Math.sin(D.yaw);
@@ -130,8 +178,10 @@ export class Effects {
     const st = this.world.stage;
     const size = st.renderer.getDrawingBufferSize(new THREE.Vector2());
     this.mat.uniforms.uScale.value = size.y / (2 * Math.tan((st.camera.fov * Math.PI) / 360));
-    if (D.active && this.visible) this.emit(dt, D, T);
-    else this.last.fill(null);
+    if (D.active && this.visible) {
+      this.emit(dt, D, T);
+      this.hoodSmoke(dt, D);
+    } else this.last.fill(null);
     // advance particles
     let alive = false;
     for (let i = 0; i < N; i++) {

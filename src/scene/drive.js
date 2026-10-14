@@ -1,5 +1,5 @@
 // Drive mode. A kinematic bicycle model with longitudinal dynamics sized from the van itself:
-// laden mass from the weight model, 2.0 L diesel power, frontal area of the high roof, rolling
+// laden mass from the weight model, a tuned turbo-diesel (see sim/powertrain.js), frontal area of the high roof, rolling
 // resistance and grip that change with the surface (road, track, grass, sand, mud, snow, lake ice).
 // The van stays at the scene origin; the land is moved underneath (floating origin).
 //
@@ -9,18 +9,26 @@ import * as THREE from 'three';
 import { weightReport } from '../sim/weight.js';
 import { SURFACES } from './land.js';
 import { Rig, SPEC } from '../sim/truck.js';
+import { VAN_ENGINE, vanDriveForce, vanGearIndex, vanRpm } from '../sim/powertrain.js';
+import { BodyDamage, chainContact, circleRectContact, damageAmount, impactZone, inertia, makeBody, resolveImpact, rolloverSpeed, staticBody, stepCrashMotion } from '../sim/crash.js';
 import { TruckRig } from './truck.js';
 
 const L = 4.325; // wheelbase
 const TRACK = 1.73;
 const R_WHEEL = 0.395;
 const G = 9.81;
-const POWER = 125e3; // W at the wheels (2.0 L OM654, ≈ 155 kW at the crank)
-const F_MAX = 9800; // N, traction/torque limit in first gear
 const CDA = 0.37 * 4.6; // Cd × frontal area (high roof)
 const RHO = 1.2;
 const DELTA_MAX = 0.5; // rad road-wheel angle (≈ 15.6 m turning circle)
 const V_MAX = 38; // m/s governed (≈ 137 km/h)
+const COM_X = 1.9; // centre of mass ahead of the rear axle (≈ 56 % of the weight on the front axle)
+const BODY_LEN = 5.9, BODY_WID = 2.0;
+const STATIC = staticBody();
+// how hard each kind of obstacle is: restitution, scuff friction and the share of the crash energy the van keeps
+const HARD = {
+  tree: { e: 0.1, mu: 0.3, share: 0.9 }, boulder: { e: 0.08, mu: 0.4, share: 1 }, building: { e: 0.1, mu: 0.3, share: 1 },
+  pole: { e: 0.12, mu: 0.3, share: 0.8 }, sign: { e: 0.15, mu: 0.3, share: 0.35 }, fence: { e: 0.2, mu: 0.3, share: 0.3 }, default: { e: 0.12, mu: 0.3, share: 0.8 },
+};
 
 export const CAMERA_MODES = ['chase', 'cockpit', 'orbit', 'cinematic'];
 const SEMI_CAMERA_MODES = ['chase', 'cockpit', 'trailer', 'orbit', 'cinematic'];
@@ -97,6 +105,18 @@ export class Driver {
     this.semi = { trailer: 'dryvan', cargo: 14000, name: 'BIG SKY FREIGHT', style: 2, cargoLook: 'lumber', tint: [0.9, 0.9, 0.88], trailerTint: [0.92, 0.92, 0.9] };
     this.parkBrake = false;
     this.rollAmt = 0;
+    this.vanGear = 0;
+    this.shiftT = 0;
+    this.vy = 0; // sideslip after an impact (m/s, + = to the right)
+    this.wc = 0; // extra yaw rate from an impact (rad/s, + = nose to the left)
+    this.dmg = new BodyDamage();
+    this.inertia = inertia(this.mass, BODY_LEN, BODY_WID);
+    this.rolledVan = false;
+    this.rollSideV = 0;
+    this.vanRollAmt = 0;
+    this.shake = 0; // 0..1 impact shake, decays
+    this.crashSlip = 0;
+    this.lastImpact = null;
     const onKey = (e) => {
       if (!this.active || e.target.closest?.('input, select, textarea')) return;
       const k = e.key.toLowerCase();
@@ -227,13 +247,8 @@ export class Driver {
   /** Engine speed from a 9-speed automatic with fixed shift bands (for the tachometer and sound). */
   rpm(throttle = 0) {
     if (this.vehicle === 'semi') return this.rig.rpm;
-    const kmh = Math.abs(this.v) * 3.6;
-    if (kmh < 2) return 760 + throttle * 600;
-    const bands = [0, 18, 32, 46, 60, 75, 90, 105, 122, 145];
-    let i = 0;
-    while (i < bands.length - 2 && kmh > bands[i + 1]) i++;
-    const f = Math.min(1, (kmh - bands[i]) / (bands[i + 1] - bands[i]));
-    return 1050 + f * 1250 + throttle * 220;
+    if (this.engineOut) return 0;
+    return vanRpm(Math.abs(this.v) * 3.6, throttle);
   }
 
   gear() {
@@ -268,6 +283,9 @@ export class Driver {
     this.colCache.x = 1e9;
     this.rig.place(yaw);
     this.rollAmt = 0;
+    this.vy = this.wc = 0;
+    this.rolledVan = false;
+    this.vanRollAmt = 0;
     this.world.fx?.clear();
   }
 
@@ -276,7 +294,8 @@ export class Driver {
    * heading. Searches outward in rings; returns the road name (or null if none within ~1.4 km).
    */
   resetToRoad() {
-    const wasRolled = this.vehicle === 'semi' && this.rig.rolled;
+    const semi = this.vehicle === 'semi';
+    const wasRolled = semi ? this.rig.rolled : this.rolledVan || this.dmg.engineDead;
     const W = this.world.gen;
     W.buildEdgesFor(this.x - 1500, this.z - 1500, this.x + 1500, this.z + 1500, Infinity);
     let best = null;
@@ -311,7 +330,11 @@ export class Driver {
     const x = cx + -tz * off, z = cz + tx * off;
     this.place(x, z, Math.atan2(-tz, tx));
     this.trail.push([x, z]);
-    this.onEvent?.(wasRolled ? 'recovered' : 'reset');
+    if (!semi && wasRolled) {
+      this.towCost = this.dmg.repairCost();
+      this.dmg.repair();
+      this.onEvent?.('towed');
+    } else this.onEvent?.(wasRolled ? 'recovered' : 'reset');
     return e.name;
   }
 
@@ -705,8 +728,13 @@ export class Driver {
     [d.p, d.pv] = spring(d.p, d.pv, this.aLong * 0.006, 60, 11);
     [d.r, d.rv] = spring(d.r, d.rv, Math.max(-0.05, Math.min(0.05, this.v * this.yawRate * 0.011)), 50, 9);
     [d.h, d.hv] = spring(d.h, d.hv, target, 220, 18);
-    W.vanRoot.rotation.set(this.roll + d.r, 0, this.pitch + d.p, 'XZY');
-    W.vanRoot.position.y = d.h;
+    // a rolled van lies down on the side it tipped toward, pivoting on that side's tyres
+    this.shake = Math.max(0, this.shake - dt * 2.2);
+    this.vanRollAmt += ((this.rolledVan ? this.rollSideV * 1.5 : 0) - this.vanRollAmt) * (1 - Math.exp(-dt * (this.rolledVan ? 3.2 : 8)));
+    const RA = this.vanRollAmt;
+    W.vanRoot.rotation.set(this.roll + d.r + RA, 0, this.pitch + d.p, 'XZY');
+    W.vanRoot.position.y = d.h + (TRACK / 2) * Math.abs(Math.sin(RA));
+    W.vanRoot.position.z = Math.sign(RA) * (TRACK / 2) * (1 - Math.cos(RA));
     T.setView(this.x, this.z, ct.h0, this.yaw);
     T.update(this.x, this.z);
     W.stage.setYaw(this.yaw);
@@ -714,6 +742,7 @@ export class Driver {
     if (this.vehicle === 'semi' && this.active) {
       this.poseSemi(dt);
       this.camera(dt);
+      this.applyShake();
       return;
     }
     // wheels: rolling and steering
@@ -727,29 +756,62 @@ export class Driver {
     for (const b of this.beams) b.intensity = beamsOn ? 38 : 0;
     W.M.tail.emissive.setHex(0xff1a1a);
     W.M.tail.emissiveIntensity = this.active ? (this.braking ? 2.6 : beamsOn ? 0.7 : 0.08) : 0.05;
-    if (this.active) this.camera(dt);
+    if (this.active) {
+      this.camera(dt);
+      this.applyShake();
+    }
+  }
+
+  /** Camera jolt after an impact (scaled by the camera-shake setting; not in free orbit). */
+  applyShake() {
+    if (this.shake < 0.02 || this.camMode === 'orbit') return;
+    const cam = this.world.stage.camera, a = this.shake * this.shake * this.cfg.camShake * 0.5;
+    cam.position.x += (Math.random() - 0.5) * a;
+    cam.position.y += (Math.random() - 0.5) * a;
+    cam.position.z += (Math.random() - 0.5) * a;
   }
 
   step(h, inp) {
     const T = this.world.terrain;
     const A = this.assist;
     // surface under the front axle decides grip and rolling resistance
-    const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
+    let c = Math.cos(this.yaw), s = Math.sin(this.yaw);
     const fx = this.x + 2.2 * c, fz = this.z - 2.2 * s;
     const sf = T.surfaceAt(fx, fz);
     this.surfaceKey = sf.key;
     this.surface = sf;
-    const { crr, mu } = this.surface;
-    // steering: rate-limited, softened with speed
+    const { mu } = this.surface;
+    const crr = this.surface.crr + this.dmg.crrExtra;
+    if (this.rolledVan) inp = { throttle: 0, brake: 0.5, steer: 0 };
+    // after an impact: the body turns under its momentum (sideslip), the tyres pull the slide out
+    this.crashSlip = 0;
+    if (this.vy !== 0 || this.wc !== 0) {
+      const st = { v: this.v, vy: this.vy, wc: this.wc, yaw: this.yaw };
+      this.crashSlip = stepCrashMotion(st, h, this.rolledVan ? 0.45 : mu);
+      this.v = st.v;
+      this.vy = st.vy;
+      this.wc = st.wc;
+      this.yaw = st.yaw;
+      c = Math.cos(this.yaw);
+      s = Math.sin(this.yaw);
+      this.slip = Math.max(this.slip, Math.min(1, Math.abs(this.vy) / 3));
+      if (!this.rolledVan && Math.abs(this.vy) > rolloverSpeed(sf.key)) this.rollOver(Math.sign(this.vy));
+    }
+    // steering: rate-limited, softened with speed; bent steering geometry pulls to one side
     const speedK = Math.max(A.minSteer, 1 - Math.abs(this.v) / A.steerFade);
-    const target = inp.steer * DELTA_MAX * speedK;
+    const target = inp.steer * DELTA_MAX * speedK + this.dmg.pull * Math.min(1, Math.abs(this.v) / 6);
     this.delta += Math.max(-1.7 * h, Math.min(1.7 * h, target - this.delta));
     // longitudinal forces
     const m = this.mass;
     const grade = Math.sin(this.pitch); // + uphill
     const v = this.v;
     const gripLimit = mu * m * G * 0.62; // rear-wheel drive, ~62 % on the rear axle when laden
-    let drive = Math.sign(inp.throttle) * Math.min(F_MAX, POWER / Math.max(Math.abs(v), 2.5)) * Math.abs(inp.throttle);
+    // automatic gearbox: an upshift under power cuts the torque for a moment
+    const gi = vanGearIndex(Math.abs(v) * 3.6);
+    if (gi > this.vanGear && inp.throttle > 0.2) this.shiftT = VAN_ENGINE.shiftDipT;
+    this.vanGear = gi;
+    this.shiftT = Math.max(0, this.shiftT - h);
+    let drive = Math.sign(inp.throttle) * vanDriveForce(v, Math.abs(inp.throttle), this.shiftT) * this.powerFactor();
     // traction control trims torque to the grip available; without it the wheels spin (and so does the sound)
     if (Math.abs(drive) > gripLimit) {
       this.spinning = Math.max(this.spinning, Math.min(1, (Math.abs(drive) - gripLimit) / gripLimit));
@@ -773,7 +835,8 @@ export class Driver {
       this.v = 0;
       a = 0;
     }
-    this.v = Math.max(-8, Math.min(V_MAX, this.v + a * h));
+    // (a spin-out can leave the van travelling backwards faster than it could ever reverse: let that coast down)
+    this.v = Math.max(Math.min(-8, this.v), Math.min(V_MAX, this.v + a * h));
     // wheelspin on a grade steeper than the grip allows (rear-wheel drive, laden)
     if (Math.abs(inp.throttle) > 0.5 && Math.abs(this.v) < 0.6 && Math.sign(inp.throttle) * grade > gripLimit / (m * G) - crr) this.emit('stuck');
     // deep water ahead: refuse to ford beyond ~0.6 m
@@ -782,7 +845,7 @@ export class Driver {
       this.emit('deep');
     }
     // yaw: kinematic bicycle with an understeer gradient, capped by available lateral grip
-    let yr = (this.v * Math.tan(this.delta)) / (L * (1 + 0.0022 * this.v * this.v));
+    let yr = this.bicycleYaw(this.v);
     const latMax = mu * G * (0.95 - 0.12 * A.stab);
     if (Math.abs(this.v * yr) > latMax) {
       yr = (Math.sign(yr) * latMax) / Math.max(Math.abs(this.v), 0.1);
@@ -791,11 +854,11 @@ export class Driver {
     } else this.slip = Math.max(this.slip, Math.min(1, Math.abs(this.v * yr) / latMax - 0.55) * 2.2);
     // side slope pushes a van sideways on low-grip ground (and the stability aid leans against it)
     const sideG = Math.sin(this.roll) * (1 - 0.7 * A.stab) * (mu < 0.5 ? 1 : 0.25);
-    this.yawRate = yr;
+    this.yawRate = yr + this.wc;
     this.aLong = a;
     this.yaw += yr * h;
-    this.x += c * this.v * h + s * sideG * 0.2 * G * h * h * 2;
-    this.z -= s * this.v * h - c * sideG * 0.2 * G * h * h * 2;
+    this.x += (c * this.v + s * this.vy) * h + s * sideG * 0.2 * G * h * h * 2;
+    this.z += (-s * this.v + c * this.vy) * h - c * sideG * 0.2 * G * h * h * 2;
     this.collide();
     this.spin += (this.v * h) / R_WHEEL * (1 + this.spinning * 2.2 * Math.sign(inp.throttle || 1) * (inp.throttle ? 1 : 0));
     const dist = Math.abs(this.v * h);
@@ -806,6 +869,22 @@ export class Driver {
       this.trail.push([this.x, this.z]);
       if (this.trail.length > 900) this.trail.shift();
     }
+  }
+
+  /** Kinematic-bicycle yaw rate (rad/s) for a forward speed at the current road-wheel angle. */
+  bicycleYaw(v) {
+    return (v * Math.tan(this.delta)) / (L * (1 + 0.0022 * v * v));
+  }
+
+  /** Fraction of engine power the van has left (damage, a rollover or an empty tank take it away). */
+  powerFactor() {
+    if (this.vehicle === 'semi') return 1;
+    return this.rolledVan ? 0 : this.dmg.powerFactor;
+  }
+
+  /** True when the van's engine cannot run (crushed engine bay or rolled onto its side). */
+  get engineOut() {
+    return this.vehicle !== 'semi' && (this.rolledVan || this.dmg.engineDead);
   }
 
   /** Solid things within reach, refreshed once per frame (buildings, town trees, wild trees, boulders). */
@@ -837,6 +916,100 @@ export class Driver {
 
   /** Solid things against the footprint circles. */
   collide() {
+    if (this.vehicle === 'semi') return this.collideSemi();
+    const cc = this.colCache;
+    for (const q of this.bodyPoints()) {
+      for (const o of cc.circles) {
+        const dx = q.x - o.x, dz = q.z - o.z;
+        if (Math.abs(dx) > 5 || Math.abs(dz) > 5) continue;
+        const d = Math.hypot(dx, dz), min = q.r + o.r;
+        if (d >= min || d < 1e-4) continue;
+        const nx = dx / d, nz = dz / d, push = min - d;
+        this.x += nx * push;
+        this.z += nz * push;
+        this.strike(o.kind || 'tree', nx, nz, o.x + nx * (o.r - push / 2), o.z + nz * (o.r - push / 2));
+      }
+      for (const r of cc.rects) {
+        const k = circleRectContact(q, r, this._rc || (this._rc = { pen: 0, nx: 0, nz: 0, px: 0, pz: 0 }));
+        if (!k) continue;
+        this.x += k.nx * k.pen;
+        this.z += k.nz * k.pen;
+        this.strike('building', k.nx, k.nz, k.px, k.pz);
+      }
+    }
+  }
+
+  /** The van runs into something fixed: impulse, spin, damage, shake, sound and sparks. */
+  strike(kind, nx, nz, px, pz) {
+    const H = HARD[kind] || HARD.default;
+    const res = this.impactVan(nx, nz, px, pz, STATIC, H.e, H.mu, H.share * this.assist.forgive, kind);
+    if (res && res.closing > 1.2) this.emit(kind);
+  }
+
+  /**
+   * Resolve an impact of the van with body B (static unless given). The normal (nx, nz) points from B
+   * to the van. Returns the impulse result or null if the bodies were already parting.
+   */
+  impactVan(nx, nz, px, pz, B, e, mu, share, kind) {
+    const f = [Math.cos(this.yaw), -Math.sin(this.yaw)], r = [Math.sin(this.yaw), Math.cos(this.yaw)];
+    const cx = this.x + f[0] * COM_X, cz = this.z + f[1] * COM_X;
+    const w0 = this.yawRate;
+    // the model tracks the rear axle; the impact acts on the centre of mass
+    const A = makeBody({ x: cx, z: cz, vx: f[0] * this.v + r[0] * this.vy + w0 * (cz - this.z), vz: f[1] * this.v + r[1] * this.vy - w0 * (cx - this.x), w: w0, m: this.mass, I: this.inertia });
+    const res = resolveImpact(A, B, nx, nz, px, pz, e, mu);
+    if (!res) return null;
+    const vrx = A.vx - A.w * (cz - this.z), vrz = A.vz + A.w * (cx - this.x);
+    this.v = vrx * f[0] + vrz * f[1];
+    this.vy = vrx * r[0] + vrz * r[1];
+    this.wc = A.w - this.bicycleYaw(this.v);
+    this.cruise.on = false;
+    const lx = (px - this.x) * f[0] + (pz - this.z) * f[1], ly = (px - this.x) * r[0] + (pz - this.z) * r[1];
+    if (res.closing > 1.2) {
+      this.hitSpeed = res.closing;
+      this.lastImpact = { kind, closing: res.closing, energy: res.energy, lx, ly, t: performance.now() };
+      this.shake = Math.max(this.shake, Math.min(1, res.closing / 11));
+      const d = this.dyn;
+      d.pv += (f[0] * nx + f[1] * nz) * res.closing * 0.05; // a frontal hit dips the nose, a rear hit squats
+      d.rv -= (r[0] * nx + r[1] * nz) * res.closing * 0.03; // a hit on the right side rocks the roof to the right
+      const amt = damageAmount(res.energy, share);
+      if (amt > 0.002) this.dmg.add(impactZone(lx, ly), amt, ly);
+      if (this.dmg.engineDead) this.emit('engineout');
+      else if (this.dmg.zone.front > 0.35) this.emit('overheat');
+      this.onImpact?.(kind, res.closing, px, pz, nx, nz, res.energy);
+      this.world.fx?.crash?.(px, this.groundH ?? 0, pz, res.closing, nx, nz);
+    }
+    if (!this.rolledVan && Math.abs(this.vy) > rolloverSpeed(this.surfaceKey) * 1.15) this.rollOver(Math.sign(this.vy));
+    return res;
+  }
+
+  /** The van tips onto its side: engine out, controls dead, wait for a tow (T). */
+  rollOver(side) {
+    if (this.rolledVan || this.vehicle === 'semi') return;
+    this.rolledVan = true;
+    this.rollSideV = side || 1;
+    this.cruise.on = false;
+    this.dmg.add(this.rollSideV > 0 ? 'right' : 'left', 0.5);
+    this.dmg.add('front', 0.15);
+    this.shake = 1;
+    this.emit('rollover');
+    this.onImpact?.('rollover', Math.hypot(this.v, this.vy), this.x, this.z, 0, 0, 0);
+  }
+
+  /** A deer, cow or bison goes into the front of the van: a soft but real impact. */
+  hitAnimal(a, S) {
+    if (this.vehicle === 'semi') {
+      this.v *= 0.55;
+      return;
+    }
+    const dx = this.x - a.x, dz = this.z - a.z, d = Math.hypot(dx, dz) || 1;
+    const m = S.mass || 300;
+    const body = makeBody({ x: a.x, z: a.z, vx: 0, vz: 0, m, I: m * 0.9 });
+    const nx = dx / d, nz = dz / d;
+    this.impactVan(nx, nz, a.x + nx * 0.6, a.z + nz * 0.6, body, 0.05, 0.2, 0.5 * this.assist.forgive, 'animal');
+  }
+
+  /** Semi: solid things against the footprint circles (simple push-out and speed loss; the rig has its own damage). */
+  collideSemi() {
     const cc = this.colCache;
     const F = this.assist.forgive;
     const semi = this.vehicle === 'semi';
@@ -846,6 +1019,7 @@ export class Driver {
         this.rig.damage = Math.min(100, this.rig.damage + sp * sp * 0.02 * weight);
         this.hitSpeed = sp;
       }
+      if (sp > 1.5) this.onImpact?.(kind, sp);
       this.emit(kind);
     };
     for (const q of this.bodyPoints()) {

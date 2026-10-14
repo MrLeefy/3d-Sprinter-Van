@@ -15,6 +15,8 @@ import { vehicleMaterial } from './vehicles.js';
 import { TrafficModels, TRAILER_VARIANTS, trailerKey } from './trafficModels.js';
 import { prng } from '../world/noise.js';
 import * as S from '../sim/traffic.js';
+import * as J from '../sim/junction.js';
+import { chainContact, damageAmount, inertia, makeBody, resolveImpact, shouldDetach, stepFree } from '../sim/crash.js';
 
 const lin = (c) => c.map((v) => Math.pow(v, 2.2));
 const CAR_COLS = [[0.92, 0.92, 0.9], [0.7, 0.72, 0.74], [0.12, 0.12, 0.13], [0.62, 0.1, 0.09], [0.12, 0.22, 0.45], [0.16, 0.34, 0.22], [0.55, 0.45, 0.3], [0.35, 0.37, 0.4], [0.85, 0.7, 0.15], [0.8, 0.45, 0.1], [0.5, 0.52, 0.56], [0.05, 0.05, 0.06], [0.4, 0.08, 0.14]].map(lin);
@@ -32,6 +34,7 @@ export const TIERS = {
   lite: { max: 6, R: 340, hi: 0, shadow: false },
 };
 const HI_CAP = 14, LO_CAP = 44;
+const ZONE = 34; // m either side of a node centre that movements through a junction share
 const BIG = 1e9;
 const PLAYER = { player: true };
 
@@ -39,7 +42,8 @@ const PLAYER = { player: true };
 const _s = { x: 0, z: 0, tx: 0, tz: 0, h: 0 };
 function sampleEdge(e, s, out = _s) {
   const n = e.n, step = e.len / (n - 1);
-  const kf = Math.max(0, Math.min(n - 1.001, s / step));
+  const s0 = s < 0 ? 0 : s > e.len ? e.len : s; // beyond either end the road is extended straight on
+  const kf = Math.max(0, Math.min(n - 1.001, s0 / step));
   const k = Math.floor(kf), t = kf - k;
   out.x = e.xs[k] + (e.xs[k + 1] - e.xs[k]) * t;
   out.z = e.zs[k] + (e.zs[k + 1] - e.zs[k]) * t;
@@ -47,6 +51,10 @@ function sampleEdge(e, s, out = _s) {
   out.tx = dx / l;
   out.tz = dz / l;
   out.h = e.hs ? e.hs[k] + (e.hs[k + 1] - e.hs[k]) * t : 0;
+  if (s0 !== s) {
+    out.x += out.tx * (s - s0);
+    out.z += out.tz * (s - s0);
+  }
   return out;
 }
 const curvOf = (e) => e._tcurv || (e._tcurv = S.polylineCurvature(e.xs, e.zs, e.n, e.len / (e.n - 1)));
@@ -113,8 +121,13 @@ export class Traffic {
     this.tgt = makeScan();
     this.tgt2 = makeScan();
     this.fp = [];
-    this.stats = { vehicles: 0, drawn: 0, hi: 0, lo: 0, honks: 0, passes: 0, crashes: 0 };
+    this.fpA = [];
+    this.fpB = [];
+    this.stats = { vehicles: 0, drawn: 0, hi: 0, lo: 0, honks: 0, passes: 0, crashes: 0, wrecks: 0, pileups: 0, transits: 0, turns: 0, arrivals: 0, waits: 0, ghosts: 0 };
     this.enabled = true;
+    this.conns = new Map(); // junction connectors by node and sides
+    this.conflicts = new Map();
+    this.resv = new Set(); // vehicles holding a place in a junction
   }
 
   setQuality(tier) {
@@ -237,7 +250,8 @@ export class Traffic {
       p: S.driverParams(kind, temper), react: rnd() < 0.05 ? 1.0 : 0.15 + rnd() * 0.3,
       latFrom: lat, latTo: lat, chT: 0, chDur: 3, mode: 'cruise', signal: 0, sigT: 0, passing: false, opp: false, passLead: null, abort: false, push: false,
       followTime: 0, idle: 3 + rnd() * 3, decT: rnd() * 0.4, limT: 0, curveLim: Infinity, townLim: Infinity, townD: Infinity, latRate: 0, brakeOn: false,
-      honk: S.makeHonk(), wreck: 0, ph: rnd() * 6.28, pendingLat: lat, pendingSide: 0, ownScan: null,
+      honk: S.makeHonk(), wreck: 0, ph: rnd() * 6.28, pendingLat: lat, pendingSide: 0, ownScan: null, latHome: lat,
+      waitT: 0, free: null, obs: null, wreckT: 0, dmg: 0, dead: false, smokeT: 0, next: undefined, arrive: false, res: null,
       x: 0, z: 0, y: 0, yaw: 0, pitch: 0, pitchT: 0, hi: false, thetaT: 0, tx: 0, tz: 0, fx: 1, fz: 0, rx: 0, rz: 1,
       col: pickc(kind === 'rv' ? RV_COLS : kind === 'bus' ? BUS_COLS : kind === 'semi' ? CAB_COLS : CAR_COLS), tcol: null, tkey: null, model: kind === 'semi' ? 'tractor' : kind,
     };
@@ -281,42 +295,89 @@ export class Traffic {
 
   // ── Perception ─────────────────────────────────────────────────────────────
   /** Look at everything in the lateral band [lo, hi] (m right of the centre line, in v's frame). */
-  scan(v, lo, hi, out, far = 400) {
+  scan(v, lo, hi, out, far = 400, across = false) {
     resetScan(out);
     const dir = v.dir, K = v.K;
     const lead = out.lead, same = out.same, onc = out.onc, fol = out.fol;
+    const vc = v.e.conn ? v.e : null;
     for (const o of this.vehicles) {
-      if (o === v || o.e !== v.e) continue;
-      const f = (o.s - v.s) * dir;
+      if (o === v) continue;
+      // a wreck that has left its path is seen through where it lies on the road (o.obs), at rest from any direction
+      const R = o.free ? o.obs : o;
+      if (!R) continue;
+      // movements through a junction that leave by the same port share their first stretch of street
+      const sib = !o.free && vc && R.e !== vc && R.e.conn && R.e.node === vc.node && R.e.inSide === vc.inSide && v.s < Math.min(vc.divS, R.e.divS) + 6 && R.s < Math.min(vc.divS, R.e.divS) + 12;
+      if (R.e !== v.e && !sib) continue;
+      const f = (R.s - v.s) * dir;
       if (f > far || f < -far * 0.5) continue;
-      const sameDir = o.dir === dir;
-      const latO = o.lat * o.dir * dir, hw = o.K.w / 2 + 0.1;
+      const sameDir = R.stat || R.dir === dir;
+      const latO = R.lat * R.dir * dir, hw = R.K.w / 2 + 0.1;
       if (latO + hw < lo || latO - hw > hi) continue;
-      const vo = sameDir ? o.v : -o.v;
+      const vo = R.stat ? 0 : sameDir ? R.v : -R.v;
       if (f >= 0) {
-        const gap = f - (sameDir ? o.K.rear : o.K.front) - K.front;
+        const gap = f - (sameDir ? R.K.rear : R.K.front) - K.front;
         if (gap < lead.gap) {
           lead.gap = gap;
           lead.v = vo;
           lead.ref = o;
-          lead.len = o.K.len;
+          lead.len = R.K.len;
         }
         if (sameDir && gap < same.gap) {
           same.gap = gap;
           same.v = vo;
           same.ref = o;
-          same.len = o.K.len;
+          same.len = R.K.len;
         }
         if (!sameDir && gap < onc.gap) {
           onc.gap = gap;
-          onc.v = o.v;
+          onc.v = R.v;
         }
       } else if (sameDir) {
-        const gap = -f - o.K.front - K.rear;
+        const gap = -f - R.K.front - K.rear;
         if (gap < fol.gap) {
           fol.gap = gap;
-          fol.v = o.v;
+          fol.v = R.stat ? 0 : R.v;
           fol.ref = o;
+        }
+      }
+    }
+    // what is just beyond the junction we are about to drive through
+    const nx = across && v.next && !v.next.arrive ? v.next : null;
+    if (nx) {
+      const toEnd = Math.max(0, this.remain(v));
+      if (toEnd < far) {
+        const nc = nx.e.conn ? nx.e : null;
+        for (const o of this.vehicles) {
+          if (o === v) continue;
+          const R = o.free ? o.obs : o;
+          if (!R) continue;
+          // on the road we are heading for, or on a sibling connector that leaves the same port (the first stretch is shared)
+          const sibling = !o.free && nc && o.e !== nc && o.e.conn && o.e.node === nc.node && o.e.inSide === nc.inSide && o.s < Math.min(nc.divS, o.e.divS) + 12;
+          if (R.e !== nx.e && !sibling) continue;
+          const along = sibling || nx.dir > 0 ? R.s : nx.e.len - R.s;
+          const f = toEnd + along;
+          if (f > far || f < 0) continue;
+          const sameDir = sibling || R.stat || R.dir === nx.dir;
+          const latO = sibling ? R.lat : R.lat * R.dir * nx.dir, hw = R.K.w / 2 + 0.1;
+          if (latO + hw < lo || latO - hw > hi) continue;
+          const vo = R.stat ? 0 : sameDir ? R.v : -R.v;
+          const gap = f - (sameDir ? R.K.rear : R.K.front) - K.front;
+          if (gap < lead.gap) {
+            lead.gap = gap;
+            lead.v = vo;
+            lead.ref = o;
+            lead.len = R.K.len;
+          }
+          if (sameDir && gap < same.gap) {
+            same.gap = gap;
+            same.v = vo;
+            same.ref = o;
+            same.len = R.K.len;
+          }
+          if (!sameDir && gap < onc.gap) {
+            onc.gap = gap;
+            onc.v = R.v;
+          }
         }
       }
     }
@@ -391,7 +452,7 @@ export class Traffic {
 
   /** Lane decisions, every ~0.4 s per vehicle. */
   decide(v, D) {
-    if (v.mode !== 'cruise' || v.wreck > 0) return;
+    if (v.mode !== 'cruise' || v.wreck > 0 || v.e.conn || this.remain(v) < 220) return;
     const e = v.e, cls = e.cls, K = v.K;
     const lanes = S.laneLats(cls, e.P.width), multi = S.isMultiLane(cls);
     if (!multi && (cls === 'gravel' || cls === 'dirt')) return;
@@ -443,7 +504,245 @@ export class Traffic {
     void D;
   }
 
+  // ── Junctions ──────────────────────────────────────────────────────────────
+  /** The road that leaves a settlement node by one of its four ports (if it has been built), and whether it starts there. */
+  portEdge(node, side) {
+    const E = this.world.gen.edges;
+    switch (side) {
+      case 'E': return { e: E.get(`${node.i},${node.j},0`), start: true };
+      case 'W': return { e: E.get(`${node.i - 1},${node.j},0`), start: false };
+      case 'S': return { e: E.get(`${node.i},${node.j},1`), start: true };
+      default: return { e: E.get(`${node.i},${node.j - 1},1`), start: false };
+    }
+  }
+
+  /** Metres until the hand-over to the next road (a connector takes over a little before the port). */
+  remain(v) {
+    const e = v.e, d = v.dir > 0 ? e.len - v.s : v.s;
+    return !e.conn && v.next && !v.next.arrive && v.next.e.conn ? d - v.next.e.tailIn : d;
+  }
+
+  /** The node a vehicle is heading for and the port it arrives by. */
+  arrivalOf(v) {
+    const e = v.e;
+    if (v.dir > 0) return { node: e.b, side: e.dir === 0 ? 'W' : 'N' };
+    return { node: e.a, side: e.dir === 0 ? 'E' : 'S' };
+  }
+
+  /** Connector through a node between two ports, built once and shared. It behaves like a road for everything else. */
+  connector(node, inSide, outSide, ein, eout, outStart) {
+    const key = `${node.key}|${inSide}${outSide}`;
+    let c = this.conns.get(key);
+    if (c) return c;
+    // the roads meet the ports at their own angles, so the connector takes over from the road a few samples
+    // before the port (tangent to it) and hands back the same way on the far side
+    const inStart = this.portEdge(node, inSide).start;
+    const roadPoint = (e, atStart, arriving) => {
+      const j = Math.min(e.n - 2, 3), k = atStart ? j : e.n - 1 - j;
+      const a = Math.max(0, k - 1), b = Math.min(e.n - 1, k + 1);
+      let dx = e.xs[b] - e.xs[a], dz = e.zs[b] - e.zs[a];
+      if (arriving === atStart) {
+        dx = -dx; // heading with the road when leaving by its start / arriving at its end, against it otherwise
+        dz = -dz;
+      }
+      const l = Math.hypot(dx, dz) || 1;
+      return { k, p: [e.xs[k], e.zs[k]], t: [dx / l, dz / l], tail: atStart ? e.ss[k] : e.len - e.ss[k] };
+    };
+    const pre = roadPoint(ein, inStart, true), post = roadPoint(eout, outStart, false);
+    const path = J.connectorPath(node, inSide, outSide, 3, 12, pre, post);
+    const n = path.n;
+    const hIn = ein.hs[pre.k], hOut = eout.hs[post.k];
+    const hs = new Float64Array(n), ss = new Float64Array(n);
+    for (let k = 0; k < n; k++) {
+      hs[k] = hIn + (hOut - hIn) * (k / (n - 1));
+      ss[k] = (path.len * k) / (n - 1);
+    }
+    let mid = 0, best = 1e18;
+    for (let k = 0; k < n; k++) {
+      const d = Math.hypot(path.xs[k] - node.x, path.zs[k] - node.z);
+      if (d < best) {
+        best = d;
+        mid = ss[k];
+      }
+    }
+    const g = this.world.gen.grid(node);
+    const street = node.kind === 'junction' ? 0 : node.kind === 'truckstop' || node.kind === 'camp' ? 9 : g.wMain;
+    const width = Math.max(street, ein.P.width, eout.P.width);
+    c = {
+      id: `c:${key}`, conn: true, node, inSide, outSide, turn: J.turnOf(inSide, outSide), cls: 'street', P: { width }, n, xs: path.xs, zs: path.zs, hs, ss, len: path.len,
+      name: node.name, sh: 0, to: eout, toStart: outStart, from: ein, path, speed: node.kind === 'junction' && J.turnOf(inSide, outSide) === 'straight' ? Math.min(S.classSpeed(ein.cls), S.classSpeed(eout.cls)) : S.classSpeed('street'), rankIn: J.classRank(ein.cls), divS: path.div, mid,
+      tailIn: pre.tail, tailOut: post.tail, keepLanes: S.isMultiLane(ein.cls) && S.isMultiLane(eout.cls), merge: S.isMultiLane(ein.cls) && !S.isMultiLane(eout.cls),
+    };
+    this.conns.set(key, c);
+    return c;
+  }
+
+  /** Do two movements through a node cross? Big rigs swing wide, so for them the paths must stay further apart. */
+  conflict(a, b, heavy = false) {
+    if (a === b) return false;
+    const key = (a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`) + (heavy ? '|H' : '');
+    let r = this.conflicts.get(key);
+    if (r === undefined) {
+      r = J.movementsConflict(a, b, a.node, 3.2, 34, heavy ? 8 : 3.4);
+      this.conflicts.set(key, r);
+    }
+    return r;
+  }
+
+  /** Decide where a vehicle goes when its road ends: onto a connector through the node, or nowhere (it arrives). */
+  planNext(v) {
+    const e = v.e;
+    if (e.conn) {
+      v.next = { e: e.to, dir: e.toStart ? 1 : -1 };
+      return;
+    }
+    const { node, side } = this.arrivalOf(v);
+    const cands = [];
+    for (const out of J.SIDES) {
+      if (!J.transitAllowed(node.kind, side, out)) continue;
+      const pe = this.portEdge(node, out);
+      if (!pe.e || pe.e === e) continue;
+      if (v.K.cls === 'heavy' && (pe.e.cls === 'gravel' || pe.e.cls === 'dirt')) continue;
+      const turn = J.turnOf(side, out);
+      // on a multi-lane road the outer lane turns right and the inner lane left
+      if (S.isMultiLane(e.cls) && ((turn === 'left' && v.lane === 1) || (turn === 'right' && v.lane === 0))) continue;
+      let w = J.turnWeight(node.kind, turn);
+      if (pe.e.cls === e.cls) w *= 1.4;
+      else if (J.classRank(pe.e.cls) < J.classRank(e.cls) - 1) w *= 0.6;
+      cands.push({ side: out, weight: w, edge: pe.e, start: pe.start });
+    }
+    const pick = J.pickExit(cands, this.rnd());
+    if (!pick) {
+      v.next = { arrive: true };
+      this.stats.arrivals++;
+      return;
+    }
+    const ch = cands.find((c) => c.side === pick);
+    v.next = { e: this.connector(node, side, pick, e, ch.edge, ch.start), dir: 1 };
+  }
+
+  /**
+   * Control for the crossing area of a connector (the stretch within ZONE m of the node centre). A vehicle
+   * asks for its place shortly before the area, holds a wall-like stop line in front of it until the
+   * movements that cross its own are clear, and gives the place back once it is through.
+   * Returns { cap, hold }: a speed cap and the distance to the stop line (or null).
+   */
+  junction(v, c, toEnd, D, dt) {
+    const K = v.K, out = this._jr || (this._jr = { cap: Infinity, hold: null });
+    const onC = v.e === c;
+    const zoneStart = c.merge ? 0 : Math.max(0, c.mid - ZONE); // a lane merge is settled at the port, a crossing in the middle
+    const dZ = onC ? zoneStart - v.s : toEnd + zoneStart;
+    out.hold = null;
+    out.cap = Infinity;
+    if (!onC && c.turn !== 'straight') out.cap = S.approachLimit(K.cls === 'heavy' ? 4.5 : 6.5, toEnd + c.divS - 4, 1.9);
+    if (v.res || dZ < -K.front) return out;
+    const reqDist = (v.v * v.v) / 9 + 15 + K.front;
+    if (dZ >= Math.max(40, reqDist)) return out;
+    const eta = Math.max(0, dZ) / Math.max(v.v, 2);
+    // a driver who has waited a while accepts a shorter gap
+    const horizon = Math.max(2.8, 6 - 0.25 * Math.max(0, v.waitT - 4));
+    if (this.mayEnter(v, c, eta, D, horizon)) {
+      v.res = c;
+      v.waiting = false;
+      v.waitT = 0;
+      this.resv.add(v);
+    } else {
+      out.hold = Math.max(0, dZ - K.front - 8); // wait well back: roads meet a port at an angle and long vehicles swing wide through it
+      if (v.v < 0.5) v.waitT += dt;
+      if (!v.waiting) {
+        v.waiting = true;
+        this.stats.waits++;
+      }
+    }
+    return out;
+  }
+
+  /** Seconds until a vehicle reaches the crossing area of the connector it is heading for (0 once inside), or null if it is not heading for this node. */
+  zoneEta(o, node) {
+    let c = null, dZ = 0;
+    if (o.e.conn && o.e.node === node) {
+      c = o.e;
+      if (o.s > c.mid + ZONE + o.K.rear) return null; // already through
+      dZ = Math.max(0, (c.merge ? 0 : Math.max(0, c.mid - ZONE)) - o.s);
+    } else if (o.next && o.next.e && o.next.e.conn && o.next.e.node === node) {
+      c = o.next.e;
+      dZ = Math.max(0, this.remain(o)) + (c.merge ? 0 : Math.max(0, c.mid - ZONE));
+    } else return null;
+    return { c, eta: dZ / Math.max(o.v, 2) };
+  }
+
+  /** May this vehicle drive into the crossing area now? Not while a crossing movement is in use or a bigger road's traffic is close. */
+  mayEnter(v, c, eta, D, horizon = 6) {
+    const me = { rank: c.rankIn, eta, id: v.id, holds: false };
+    for (const o of this.vehicles) {
+      if (o === v || o.free) continue;
+      const z = this.zoneEta(o, c.node);
+      if (!z) continue;
+      const oc = z.c, holds = !!o.res && o.res.node === c.node;
+      // the same movement only matters when it comes from the other lane of a multi-lane road: both lanes squeeze into one
+      if (oc === c ? !(c.merge && o.lane !== v.lane && (o.e === v.e || (o.e === c && o.s < 80))) : !this.conflict(oc, c, v.K.cls === 'heavy' || o.K.cls === 'heavy')) continue;
+      if (J.mustYield(me, { rank: oc.rankIn, eta: holds ? 0 : z.eta, id: o.id, holds }, horizon)) {
+        v.blockedBy = o;
+        return false;
+      }
+    }
+    v.blockedBy = null;
+    // the player has right of way in the junction and when about to reach it
+    if (D && D.active) {
+      const d = Math.hypot(D.x - c.node.x, D.z - c.node.z);
+      if (d < 30 || (d < 100 && Math.abs(D.v) > 3 && d / Math.abs(D.v) < 5)) {
+        v.blockedBy = PLAYER;
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Move a vehicle from the end of its road onto the planned next one (a connector, or the road beyond it). */
+  transfer(v, over) {
+    const nx = v.next;
+    if (!nx || nx.arrive) {
+      v.next = undefined;
+      v.arrive = true;
+      return;
+    }
+    const ne = nx.e, K = v.K, prev = v.e;
+    v.next = undefined;
+    v.e = ne;
+    v.dir = nx.dir;
+    v.s = ne.conn ? over : nx.dir > 0 ? prev.tailOut + over : ne.len - prev.tailOut - over;
+    if (!ne.conn) {
+      this.resv.delete(v);
+      v.res = null;
+      this.stats.transits++;
+    } else if (ne.turn !== 'straight') this.stats.turns++;
+    // the new road's lane, speed and a clean slate for the lane-change machine
+    const keep = ne.conn ? ne.keepLanes : S.isMultiLane(ne.cls) && S.isMultiLane(prev.conn ? prev.from.cls : prev.cls);
+    const lanes = ne.conn ? (ne.keepLanes ? S.laneLats(ne.from.cls, ne.from.P.width) : S.laneLats('street', ne.P.width)) : S.laneLats(ne.cls, ne.P.width);
+    const multi = S.isMultiLane(ne.cls);
+    if (!keep) v.lane = multi ? (K.cls === 'heavy' || this.rnd() < 0.62 ? 1 : 0) : 0;
+    v.latHome = lanes[Math.min(v.lane, lanes.length - 1)];
+    v.latTo = v.latHome;
+    v.latFrom = v.lat;
+    v.mode = 'cruise';
+    v.signal = 0;
+    v.passing = v.opp = v.abort = v.push = false;
+    v.passLead = null;
+    v.pendingLat = v.latHome;
+    v.idle = 0;
+    v.followTime = 0;
+    v.limT = 0;
+    v.curveLim = Infinity;
+    v.townLim = Infinity;
+    v.vmax = (ne.speed ?? S.classSpeed(ne.cls)) * K.vmul * (0.92 + (0.2 * (v.temper - 0.88)) / 0.3) * (multi && v.lane === 0 ? 1.04 : 1);
+    v.ownScan = null;
+  }
+
   stepVehicle(v, dt, D) {
+    if (v.free) return this.stepWreck(v, dt, D);
+    // reached the end of the road last frame: carry on through the junction onto the next road
+    const rem = this.remain(v);
+    if (rem <= 0 && !v.arrive) this.transfer(v, -rem);
     const e = v.e, K = v.K, cls = e.cls, multi = S.isMultiLane(cls);
     // limits (curves, towns, road end) refreshed a few times a second
     v.limT -= dt;
@@ -451,17 +750,36 @@ export class Traffic {
       v.limT = 0.3 + (v.id % 5) * 0.04;
       this.updateLimits(v, D);
     }
-    const toEnd = v.dir > 0 ? e.len - v.s : v.s;
-    const endLim = S.approachLimit(7, toEnd - 50, 1.4);
+    const toEnd = this.remain(v);
+    if (v.res && e === v.res && v.s > e.mid + ZONE + K.rear) {
+      // clear of the crossing area: the others may go
+      this.resv.delete(v);
+      v.res = null;
+    }
+    if (v.next === undefined && !v.arrive && toEnd < 300) this.planNext(v);
+    // beyond a road that goes nowhere the vehicle crawls on and is removed; into a junction it slows for the movement and waits its turn
+    let endLim = Infinity, hold = null;
+    if (!v.next || v.next.arrive) endLim = S.approachLimit(6, toEnd - 25, 1.4);
+    const jc = e.conn ? e : v.next && !v.next.arrive && v.next.e.conn ? v.next.e : null;
+    if (jc) {
+      const j = this.junction(v, jc, toEnd, D, dt);
+      endLim = Math.min(endLim, j.cap);
+      hold = j.hold;
+    }
     let v0 = Math.min(v.vmax * (v.push && v.opp ? 1.15 : 1), v.curveLim, v.townLim, endLim);
     // perceive
     const hw = K.w / 2 + 0.1;
-    const own = this.scan(v, v.lat - hw, v.lat + hw, v.ownScan || (v.ownScan = makeScan()), 420);
+    const own = this.scan(v, v.lat - hw, v.lat + hw, v.ownScan || (v.ownScan = makeScan()), 420, true);
     let lead = own.lead;
+    if (hold !== null && hold < lead.gap) lead = { gap: hold, v: 0, ref: null, len: 0 }; // the stop line is a wall until the junction is free
     if (v.mode === 'signal' || v.mode === 'change') {
       // while moving over, watch the leader in the lane we are heading for as well
       const lt = v.mode === 'signal' ? v.pendingLat : v.latTo;
-      const t2 = this.scan(v, lt - hw, lt + hw, this.tgt2, 420);
+      const t2 = this.scan(v, lt - hw, lt + hw, this.tgt2, 420, true);
+      if (t2.lead.gap < lead.gap) lead = t2.lead;
+    } else if (Math.abs(v.latHome - v.lat) > 0.4) {
+      // drifting into another lane after a junction: the leader there matters too
+      const t2 = this.scan(v, v.latHome - hw, v.latHome + hw, this.tgt2, 420, true);
       if (t2.lead.gap < lead.gap) lead = t2.lead;
     }
     if (v.abort && v.passLead && v.passLead !== PLAYER && v.passLead.v !== undefined) v0 = Math.min(v0, Math.max(0, v.passLead.v - 3));
@@ -471,15 +789,22 @@ export class Traffic {
       v.wreck -= dt;
       acc = -6;
     }
+    if (v.dead) {
+      acc = Math.min(acc, -4); // a crushed engine bay: coast to a stop with the hazards on
+      if (v.v < 0.1) {
+        this.detach(v, { vx: 0, vz: 0, w: 0 }); // and sit there as a wreck until it is towed
+        return;
+      }
+    }
     // lag between wanting to brake and braking (reaction); emergency stops are not delayed
     v.a += (acc - v.a) * Math.min(1, dt / (acc < -4 ? 0.06 : v.react));
-    if (lead.gap < 0.4 && lead.ref && lead.ref !== PLAYER) {
+    if (lead.gap < 0.4 && lead.ref && lead.ref !== PLAYER && !lead.ref.free) {
       v.v = Math.min(v.v, Math.max(0, lead.v));
       v.a = Math.min(v.a, 0);
     }
     v.v = Math.max(0, v.v + v.a * dt);
     v.s += v.dir * v.v * dt;
-    v.s = Math.max(2, Math.min(e.len - 2, v.s));
+    v.s = Math.max(-150, Math.min(e.len + 150, v.s));
     // held up behind something slower?
     const held = own.same.gap < Math.max(40, v.v * 3) && own.same.v < Math.min(v.vmax, v.curveLim) - 1.2 && own.same.ref;
     if (held) {
@@ -521,6 +846,11 @@ export class Traffic {
       }
     }
     v.latRate = 0;
+    if (v.mode === 'cruise' && Math.abs(v.latHome - v.lat) > 0.01) {
+      const d = Math.max(-0.7 * dt, Math.min(0.7 * dt, v.latHome - v.lat)); // drift back to the lane after a bump
+      v.lat += d;
+      v.latRate = d / dt;
+    }
     if (v.mode === 'change') {
       v.chT += dt;
       const p = Math.min(1, v.chT / v.chDur), dl = v.latTo - v.latFrom;
@@ -530,6 +860,7 @@ export class Traffic {
         v.mode = 'cruise';
         v.signal = 0;
         v.lat = v.latTo;
+        v.latHome = v.latTo;
         v.latRate = 0;
         const inner = multi ? v.lane === 0 : v.opp;
         if (!inner) {
@@ -597,8 +928,7 @@ export class Traffic {
   }
 
   // ── Footprints and collisions with the player ──────────────────────────────
-  footprint(v) {
-    const out = this.fp;
+  footprint(v, out = this.fp) {
     let n = 0;
     const put = (x, z, r) => {
       const c = out[n] || (out[n] = { x: 0, z: 0, r: 0 });
@@ -617,63 +947,238 @@ export class Traffic {
     return out;
   }
 
-  collidePlayer(v, D, dt) {
-    const dx = v.x - D.x, dz = v.z - D.z;
-    if (dx * dx + dz * dz > 58 * 58) return;
-    const fp = this.footprint(v);
-    let best = 0, nx = 0, nz = 0;
-    for (const c of fp) {
-      for (const q of this.pc) {
-        const ex = q.x - c.x, ez = q.z - c.z, d = Math.hypot(ex, ez), pen = c.r + q.r - d;
-        if (pen > best && d > 1e-4) {
-          best = pen;
-          nx = ex / d;
-          nz = ez / d;
+  /** Rigid-body view of a vehicle for the impact solver (a path follower moves along its lane; a wreck is free). */
+  bodyOf(v) {
+    const K = v.K, I = inertia(K.mass, K.len, K.w);
+    if (v.free) return makeBody({ x: v.free.x, z: v.free.z, vx: v.free.vx, vz: v.free.vz, w: v.free.w, m: K.mass, I });
+    return makeBody({ x: v.x, z: v.z, vx: v.v * v.fx + v.latRate * v.rx, vz: v.v * v.fz + v.latRate * v.rz, w: 0, m: K.mass, I });
+  }
+
+  /** Slide a vehicle by (dx, dz) metres: wrecks move freely, path followers along their lane. */
+  nudge(v, dx, dz) {
+    if (v.free) {
+      v.free.x += dx;
+      v.free.z += dz;
+      return;
+    }
+    v.s += v.dir * (dx * v.fx + dz * v.fz);
+    v.lat += Math.max(-0.6, Math.min(0.6, dx * v.rx + dz * v.rz));
+  }
+
+  /** Take an impact result back into an AI vehicle: damage, then either keep driving or leave the road. */
+  applyImpact(v, B, res, share) {
+    v.dmg = Math.min(1, v.dmg + damageAmount(res.energy, share));
+    if (v.dmg > 0.5) v.dead = true;
+    if (v.free) {
+      v.free.vx = B.vx;
+      v.free.vz = B.vz;
+      v.free.w = B.w;
+      return;
+    }
+    const along = B.vx * v.fx + B.vz * v.fz, lat = B.vx * v.rx + B.vz * v.rz;
+    if (shouldDetach(res.closing, lat - v.latRate, B.w) || v.dmg > 0.8) this.detach(v, B);
+    else {
+      v.v = Math.max(0, along);
+      v.a = Math.min(v.a, -2);
+    }
+  }
+
+  /** The vehicle leaves its path and becomes a free body (a wreck) with the velocity the crash gave it. */
+  detach(v, B) {
+    if (v.free) return;
+    v.free = { x: v.x, z: v.z, yaw: v.yaw, vx: B.vx, vz: B.vz, w: B.w };
+    v.wreckT = 0;
+    v.wreck = 0;
+    v.mode = 'cruise';
+    v.signal = 0;
+    v.brakeOn = false;
+    v.passing = false;
+    v.dead = true;
+    v.honk.cd = 0;
+    this.stats.wrecks++;
+  }
+
+  /**
+   * A wreck slides to a stop, then sits with its hazards on, smoking if badly hurt, until it is towed
+   * (removed once nobody is looking). Where it lies on the road is published as `obs` for the others.
+   */
+  stepWreck(v, dt) {
+    const fb = v.free, W = this.world.gen;
+    const q = W.roadAt(fb.x, fb.z);
+    const onRoad = !!q && q.d < q.edge.P.width / 2 + (q.edge.sh || 0) + 0.5;
+    const rest = stepFree(fb, dt, { mu: onRoad ? 0.7 : 0.45, drag: onRoad ? 4 : 5.5, spinDecay: onRoad ? 1.1 : 2 });
+    v.wreckT += dt;
+    v.x = fb.x;
+    v.z = fb.z;
+    v.yaw = fb.yaw;
+    v.v = Math.hypot(fb.vx, fb.vz);
+    const hx = Math.cos(fb.yaw), hz = -Math.sin(fb.yaw);
+    v.fx = hx;
+    v.fz = hz;
+    v.rx = -hz;
+    v.rz = hx;
+    const h0 = this.land.heightAt(v.x, v.z);
+    v.y = h0 + 0.03;
+    v.pitch = Math.atan2(this.land.heightAt(v.x + hx * 2.2, v.z + hz * 2.2) - this.land.heightAt(v.x - hx * 2.2, v.z - hz * 2.2), 4.4);
+    if (v.kind === 'semi') {
+      const u = fb.vx * hx + fb.vz * hz;
+      v.thetaT = S.stepTrailer(v.thetaT, fb.yaw, u, dt);
+      v.kx = v.x + hx * S.SEMI_HITCH;
+      v.kz = v.z + hz * S.SEMI_HITCH;
+      v.pitchT = v.pitch;
+    }
+    v.wreck = v.wreckT < 150 ? 1 : 0; // hazard lights
+    // hurt vehicles smoke
+    if (v.dmg > 0.3) {
+      v.smokeT -= dt;
+      if (v.smokeT <= 0) {
+        v.smokeT = 0.14;
+        this.world.fx?.smokeAt?.(v.x + hx * v.K.front * 0.55, v.y + 1.0, v.z + hz * v.K.front * 0.55, v.dmg);
+      }
+    }
+    // where it lies on the road (or on a junction connector in a town), for the drivers who must get past it
+    let e = null, sPos = 0, side = 0, tx = 1, tz = 0;
+    if (q && onRoad) {
+      e = q.edge;
+      sPos = (q.k + q.t) * (e.len / (e.n - 1));
+      side = q.side;
+      tx = q.tx;
+      tz = q.tz;
+    } else if (this.conns.size) {
+      let best = 14;
+      for (const c of this.conns.values()) {
+        if (Math.abs(c.node.x - v.x) > c.node.Rp + 20 || Math.abs(c.node.z - v.z) > c.node.Rz + 20) continue;
+        for (let k = 0; k < c.n; k++) {
+          const d = Math.hypot(c.xs[k] - v.x, c.zs[k] - v.z);
+          if (d < best) {
+            best = d;
+            e = c;
+            sPos = c.ss[k];
+            const a = Math.max(0, k - 1), b = Math.min(c.n - 1, k + 1), l = Math.hypot(c.xs[b] - c.xs[a], c.zs[b] - c.zs[a]) || 1;
+            tx = (c.xs[b] - c.xs[a]) / l;
+            tz = (c.zs[b] - c.zs[a]) / l;
+            side = (v.x - c.xs[k]) * -tz + (v.z - c.zs[k]) * tx;
+          }
         }
       }
     }
-    if (best <= 0) return;
-    const semi = D.vehicle === 'semi';
-    const mP = semi ? D.rig.mass : 3800, mA = v.K.mass;
-    const hx = Math.cos(v.yaw), hz = -Math.sin(v.yaw); // AI heading
-    const ph = this.pcx * hx + this.pcz * hz; // cosine of the angle between the two headings
-    const uA = v.v, uP = D.v * ph; // speeds along the AI's heading
-    const along = nx * hx + nz * hz; // > 0: the player is in front of the AI
-    const rel = D.v * (this.pcx * nx + this.pcz * nz) - (v.v * v.fx + v.latRate * v.rx) * nx - (v.v * v.fz + v.latRate * v.rz) * nz; // normal speed of the player relative to the AI
-    const closing = Math.max(0, -rel);
-    // positional separation: the AI is bound to its path, so the player gives most of the way
-    const push = best + 0.02;
-    D.x += nx * push * 0.7;
-    D.z += nz * push * 0.7;
-    const sx = -nx * push * 0.3, sz = -nz * push * 0.3;
-    v.s += v.dir * (sx * v.fx + sz * v.fz);
-    v.lat += Math.max(-0.8, Math.min(0.8, sx * v.rx + sz * v.rz));
-    if (closing < 0.3) return;
-    if (Math.abs(along) > 0.45) {
-      const r = S.collide1D(mA, uA, mP, uP, 0.15);
-      const rear = along > 0 && uA > uP + 0.5; // the AI drove into the back of the player
-      v.v = Math.max(0, r.vA);
-      v.a = Math.min(v.a, -2);
-      D.v += (r.vB - uP) * ph;
-      this.hit(v, D, closing, mA, mP, rear);
-    } else {
-      // sideswipe: scrub speed and shove the AI sideways a little
-      D.v *= 1 - Math.min(0.12, closing * 0.01);
-      v.lat += Math.max(-0.4, Math.min(0.4, (-nx * v.rx - nz * v.rz) * 0.2));
-      v.v *= 0.97;
-      this.hit(v, D, closing * 0.6, mA, mP, false);
+    if (e) {
+      let along = 0, across = 0;
+      const rx = -tz, rz = tx;
+      for (const c of this.footprint(v)) {
+        const dx = c.x - v.x, dz = c.z - v.z;
+        along = Math.max(along, Math.abs(dx * tx + dz * tz) + c.r);
+        across = Math.max(across, Math.abs(dx * rx + dz * rz) + c.r);
+      }
+      const o = v.obs || (v.obs = { e, s: 0, dir: 1, lat: 0, v: 0, stat: true, K: { w: 2, front: 2, rear: 2, len: 4 } });
+      o.e = e;
+      o.s = sPos;
+      o.lat = side;
+      o.stat = rest || v.v < 1.5;
+      o.v = o.stat ? 0 : v.v * (fb.vx * tx + fb.vz * tz >= 0 ? 1 : -1);
+      o.K.w = across * 2;
+      o.K.front = o.K.rear = along;
+      o.K.len = along * 2;
+    } else v.obs = null;
+  }
+
+  // ── Collisions ─────────────────────────────────────────────────────────────
+  /** Two AI vehicles (or a wreck and a vehicle) touch: full impulse, both may be knocked off the road. */
+  collidePair(a, b) {
+    const k = chainContact(this.footprint(a, this.fpA), this.footprint(b, this.fpB), this._kp || (this._kp = {}));
+    if (!k || k.pen < 0.4) return; // the circles are generous: a few centimetres of overlap is two vehicles passing close, not a crash
+    const A = this.bodyOf(a), B = this.bodyOf(b);
+    const mA = a.K.mass, mB = b.K.mass, push = k.pen + 0.02;
+    const shA = a.free || b.free ? mB / (mA + mB) : 0.5;
+    if (a.free || b.free) {
+      this.nudge(a, k.nx * push * shA, k.nz * push * shA);
+      this.nudge(b, -k.nx * push * (1 - shA), -k.nz * push * (1 - shA));
     }
+    // two path followers never crash into each other: the driving logic keeps them apart, and where it falls short (a
+    // hand-over between roads, a swinging trailer) they simply pass through. Only a wreck, or the player, makes a crash.
+    if (!a.free && !b.free) {
+      if (Math.hypot(A.vx - B.vx, A.vz - B.vz) > 2.5) this.stats.ghosts++;
+      return;
+    }
+    const res = resolveImpact(A, B, k.nx, k.nz, k.px, k.pz, 0.15, 0.4);
+    if (!res) return;
+    this.applyImpact(a, A, res, 0.5);
+    this.applyImpact(b, B, res, 0.5);
+    if (res.closing > 2) {
+      this.stats.pileups++;
+      this.world.fx?.crash?.(k.px, a.y, k.pz, res.closing, k.nx, k.nz);
+      this.sound(a, 'crash', res.closing);
+    }
+  }
+
+  collidePairs() {
+    const vs = this.vehicles;
+    for (let i = 0; i < vs.length; i++) {
+      const a = vs[i];
+      const ra = a.kind === 'semi' ? 27 : 7;
+      for (let j = i + 1; j < vs.length; j++) {
+        const b = vs[j];
+        const lim = ra + (b.kind === 'semi' ? 27 : 7);
+        if (Math.abs(a.x - b.x) > lim || Math.abs(a.z - b.z) > lim) continue;
+        if (a.free && b.free && a.v < 0.2 && b.v < 0.2) continue; // two wrecks at rest
+        this.collidePair(a, b);
+      }
+    }
+  }
+
+  /** Crash sound for an AI-only impact, panned and attenuated by distance from the player. */
+  sound(v, kind, closing) {
+    const D = this.D;
+    if (!D) return;
+    const dist = Math.hypot(v.x - D.x, v.z - D.z);
+    if (dist > 220) return;
+    window.__app?.sound?.fx?.('impact', kind, Math.max(3, closing) * Math.max(0.15, 1 - dist / 220), v.K.cls === 'heavy');
+  }
+
+  collidePlayer(v, D, dt) {
+    const dx = v.x - D.x, dz = v.z - D.z;
+    if (dx * dx + dz * dz > 58 * 58) return;
+    const k = chainContact(this.pc, this.footprint(v), this._kc || (this._kc = {}));
+    if (!k) return;
+    const semi = D.vehicle === 'semi';
+    const B = this.bodyOf(v);
+    const mA = v.K.mass, mP = semi ? D.rig.mass : D.mass;
+    const push = k.pen + 0.02;
+    // positional separation: a path follower can only be nudged along its path, so the player gives most of the way
+    const shP = v.free ? mA / (mA + mP) : 0.7;
+    D.x += k.nx * push * shP;
+    D.z += k.nz * push * shP;
+    this.nudge(v, -k.nx * push * (1 - shP), -k.nz * push * (1 - shP));
+    // who ran into whom: compare how fast each was closing along the contact normal
+    const hx = Math.cos(D.yaw), hz = -Math.sin(D.yaw);
+    const dvx = D.v * hx + (D.vy || 0) * hz * -1, dvz = D.v * hz + (D.vy || 0) * hx;
+    const vAI = B.vx * k.nx + B.vz * k.nz, vP = dvx * k.nx + dvz * k.nz;
+    const byAI = vAI > 0 && vAI > -vP;
+    let res;
+    if (semi) {
+      // the rig is far too heavy to spin: only its speed changes
+      const A = makeBody({ x: D.x, z: D.z, vx: D.v * hx, vz: D.v * hz, m: mP, I: 5e6 });
+      res = resolveImpact(A, B, k.nx, k.nz, k.px, k.pz, 0.15, 0.4);
+      if (res) {
+        D.v = A.vx * hx + A.vz * hz;
+        D.rig.v = D.v;
+        if (res.closing >= 1.2) {
+          D.rig.damage = Math.min(100, D.rig.damage + S.impactDamage(res.closing, mA, mP));
+          D.hitSpeed = res.closing;
+          D.onImpact?.('crash', res.closing, k.px, k.pz, k.nx, k.nz, res.energy);
+          this.world.fx?.crash?.(k.px, D.groundH ?? 0, k.pz, res.closing, k.nx, k.nz);
+        }
+      }
+    } else res = D.impactVan(k.nx, k.nz, k.px, k.pz, B, 0.18, 0.4, 0.5 * D.assist.forgive, 'crash');
+    if (!res) return;
+    this.applyImpact(v, B, res, 0.5);
+    if (res.closing >= 1.2) this.hit(v, D, res.closing, byAI);
     void dt;
   }
 
-  hit(v, D, closing, mA, mP, byAI) {
-    if (closing < 1.2) return;
+  hit(v, D, closing, byAI) {
     this.stats.crashes++;
-    this.stats.last = { kind: v.kind, closing: +closing.toFixed(1), byAI, mode: v.mode, lat: +v.lat.toFixed(2), opp: v.opp, vAI: +v.v.toFixed(1), clock: +this.clock.toFixed(1) };
-    if (D.vehicle === 'semi') {
-      D.rig.damage = Math.min(100, D.rig.damage + S.impactDamage(closing, mA, mP));
-      D.hitSpeed = closing;
-    }
+    this.stats.last = { kind: v.kind, closing: +closing.toFixed(1), byAI, mode: v.mode, lat: +v.lat.toFixed(2), opp: v.opp, vAI: +v.v.toFixed(1), free: !!v.free, clock: +this.clock.toFixed(1) };
     D.lastHit = 'vehicle';
     D.emit(byAI ? 'rearended' : 'crash');
     v.wreck = Math.max(v.wreck, 2.5 + Math.min(3, closing * 0.3));
@@ -717,14 +1222,21 @@ export class Traffic {
       const v = this.vehicles[i];
       this.stepVehicle(v, dt, D);
       const dist = Math.hypot(v.x - D.x, v.z - D.z);
-      const atEnd = v.s < 14 || v.s > v.e.len - 14;
       let gone = dist > Rdes;
-      if (atEnd) {
-        if (dist > 130 && !this.inView(v.x, v.z, 25, v.y)) gone = true;
-        else v.vmax = Math.min(v.vmax, 2);
+      if (v.free) {
+        // wrecks stay until they have been there a while and nobody is watching (or they are far away)
+        if (v.wreckT > 75 && (dist > 140 || !this.inView(v.x, v.z, 25, v.y))) gone = true;
+        else if (v.wreckT > 300 && dist > 50) gone = true;
+      } else if (v.arrive) {
+        // drove on past a road that goes nowhere (into the settlement or yard): gone once out of sight
+        const past = v.dir > 0 ? v.s - v.e.len : -v.s;
+        if (past > 28 && (dist > 90 || !this.inView(v.x, v.z, 25, v.y))) gone = true;
+        else if (past > 110) gone = true;
       }
       if (gone || (this.vehicles.length > this.max + 2 && dist > 250 && !this.inView(v.x, v.z, 30, v.y))) this.vehicles.splice(i, 1);
     }
+    for (const v of this.resv) if (!v.res || v.free || !this.vehicles.includes(v)) this.resv.delete(v);
+    this.collidePairs();
     for (const v of this.vehicles) this.collidePlayer(v, D, dt);
     this.paint(D);
   }

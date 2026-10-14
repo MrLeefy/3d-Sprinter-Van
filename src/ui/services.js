@@ -177,7 +177,7 @@ export class Services {
     if (z.type === 'fuel') {
       const p = this.dieselPrice(z);
       return `<p>Diesel $${p.toFixed(2)}/gal <small>($${(p / GAL).toFixed(2)}/L)</small> · tank <span data-k="fuel"></span></p>
-        <div class="sv-btns"><button class="dh-btn primary" data-act="fill">Fill up</button><button class="dh-btn" data-act="fill20">+ 20 L</button></div>`;
+        <div class="sv-btns"><button class="dh-btn primary" data-act="fill">Fill up</button><button class="dh-btn" data-act="fill20">+ 20 L</button><button class="dh-btn" data-act="repair" data-k="repair">Repair</button></div>`;
     }
     if (z.type === 'water') {
       const p = this.waterPrice(z);
@@ -206,6 +206,17 @@ export class Services {
     set('fresh', `${s.freshL.toFixed(0)} / ${WATER.freshUsableL} L`);
     set('grey', `${s.greyL.toFixed(0)} / ${WATER.greyL} L`);
     set('urine', `${s.urineL.toFixed(1)} / ${WATER.urineL} L`);
+    const cost = this.repairCost();
+    this.el.querySelectorAll('[data-k="repair"]').forEach((b) => {
+      b.textContent = cost > 0 ? `Repair body · ${money(cost)}` : 'No damage';
+      b.disabled = cost <= 0;
+    });
+  }
+
+  /** Garage price for the current damage (the van's zones, or the rig's damage points). */
+  repairCost() {
+    const D = this.D;
+    return D.vehicle === 'semi' ? Math.round((D.rig.damage * 40) / 10) * 10 : D.dmg.repairCost();
   }
 
   onUse() {
@@ -232,6 +243,14 @@ export class Services {
       this.ui.passport?.log(`Bought ${want.toFixed(0)} L of diesel in ${z.node.name} (${money(cost)})`);
       this.ui.passport?.achieve?.('refuel');
       A.toast(`Pump: ${want.toFixed(1)} L of diesel for ${money(cost)}. Safe travels.`);
+    } else if (a === 'repair') {
+      const cost = this.repairCost();
+      if (cost <= 0) return A.toast('Nothing to repair.');
+      if (!this.pay(cost, 'the body shop')) return;
+      if (semi) this.D.rig.damage = 0;
+      else this.D.dmg.repair();
+      this.ui.passport?.log(`Repaired the ${semi ? 'rig' : 'van'} in ${z.node.name} (${money(cost)})`);
+      A.toast(`Garage: dents pulled, radiator and steering straightened — ${money(cost)}. Good as new.`);
     } else if (a === 'water') {
       const p = this.waterPrice(z);
       if (s.freshL > WATER.freshUsableL - 1) return A.toast('The fresh tank is already full.');

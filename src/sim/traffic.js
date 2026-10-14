@@ -42,9 +42,9 @@ export function driverParams(kind, temper = 1) {
 
 // ── Road classes ──────────────────────────────────────────────────────────────
 /** Typical free-flow speed (m/s) of a road class. */
-export const CLASS_SPEED = { interstate: 33, highway: 28, county: 23, gravel: 14, dirt: 8 };
+export const CLASS_SPEED = { interstate: 33, highway: 28, county: 23, gravel: 14, dirt: 8, street: 12 };
 /** Vehicles per km used to weight where traffic appears. */
-export const CLASS_DENSITY = { interstate: 9, highway: 5, county: 1.8, gravel: 0.35, dirt: 0.08 };
+export const CLASS_DENSITY = { interstate: 9, highway: 5, county: 1.8, gravel: 0.35, dirt: 0.08, street: 0 };
 export const classSpeed = (cls) => CLASS_SPEED[cls] ?? 15;
 
 /** Share of each vehicle kind by road class. */
@@ -77,6 +77,7 @@ export function laneLats(cls, width) {
   if (cls === 'highway') return [0.22 * width];
   if (cls === 'county') return [0.22 * width];
   if (cls === 'gravel') return [0.2 * width];
+  if (cls === 'street') return [0.25 * width];
   return [0.14 * width];
 }
 export const isMultiLane = (cls) => cls === 'interstate';

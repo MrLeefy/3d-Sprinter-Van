@@ -8,7 +8,7 @@ const FILES = ['wind', 'birds', 'crickets', 'rain', 'morning', 'blinker', 'parkb
 const LOOPS = ['wind', 'birds', 'crickets', 'rain', 'morning'];
 const IMPACT = {
   tree: ['wood0', 'wood1', 'thud0'], boulder: ['crashMed0', 'plate0'], building: ['crashHeavy0', 'crashHeavy1', 'crashHeavy2'],
-  crash: ['crashHeavy1', 'crashMed1', 'glass0'], animal: ['thud0', 'thud1'], rollover: ['crashHeavy2', 'crashHeavy0', 'glass0'], jackknife: ['crashMed0'],
+  crash: ['crashHeavy1', 'crashMed1', 'glass0'], animal: ['thud0', 'thud1'], pole: ['thud1', 'wood1'], sign: ['plate0', 'thud1'], rollover: ['crashHeavy2', 'crashHeavy0', 'glass0'], jackknife: ['crashMed0'],
 };
 const rnd = (a) => a[Math.floor(Math.random() * a.length)];
 
@@ -71,9 +71,12 @@ export class Sfx {
   impact(kind, speed = 5, heavy = false) {
     const list = IMPACT[kind];
     if (!list) return;
-    const g = Math.min(1, 0.25 + speed / 18);
-    this.play(rnd(list), g, (heavy ? 0.78 : 1) * (0.92 + Math.random() * 0.16), 0.2);
-    if (heavy && speed > 8) this.play(rnd(IMPACT.building), g * 0.7, 0.7, 0.2);
+    const g = Math.min(1, 0.2 + speed / 16);
+    // a hard hit is deeper (lower playback rate) and brings crumpling metal and glass with it
+    const rate = (heavy ? 0.78 : 1) * (0.92 + Math.random() * 0.16) * (1 - Math.min(0.2, speed / 90));
+    this.play(rnd(list), g, rate, 0.12);
+    if (speed > 9 && (kind === 'crash' || kind === 'building' || kind === 'rollover')) this.play('glass0', Math.min(1, g * 0.8), 0.9 + Math.random() * 0.2, 0.3);
+    if ((heavy && speed > 8) || speed > 16) this.play(rnd(IMPACT.building), g * 0.7, 0.7, 0.2);
   }
 
   setLoop(name, target, t = 0.6) {

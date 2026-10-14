@@ -7,7 +7,7 @@ import { SEASON_KEYS, SEASONS } from '../scene/season.js';
 import { SCENARIOS } from '../data/scenarios.js';
 import { drawWorldMap } from './mapview.js';
 import { MapScreen } from './mapscreen.js';
-import { Services } from './services.js';
+import { Services, money } from './services.js';
 import { Passport } from './passport.js';
 import { Jobs } from './jobs.js';
 import { SPEC, TRAILER_CARGO } from '../sim/truck.js';
@@ -100,7 +100,7 @@ export class DriveUI {
         <div class="dh-m dh-semi-only"><span>Air</span><i class="bar"><i id="dhAir"></i></i><em id="dhAirT"></em></div>
         <div class="dh-m dh-semi-only"><span>Trailer angle</span><i class="bar"><i id="dhJack"></i></i><em id="dhJackT"></em></div>
         <div class="dh-m dh-semi-only"><span>Brakes</span><i class="bar"><i id="dhBrk"></i></i><em id="dhBrkT"></em></div>
-        <div class="dh-m dh-semi-only"><span>Damage</span><i class="bar"><i id="dhDmg"></i></i><em id="dhDmgT"></em></div>
+        <div class="dh-m"><span>Damage</span><i class="bar"><i id="dhDmg"></i></i><em id="dhDmgT"></em></div>
         <div class="dh-m dh-van-only"><span>House battery</span><i class="bar"><i id="dhBat"></i></i><em id="dhBatT"></em></div>
         <div class="dh-m"><span>Engine</span><i class="bar"><i id="dhRpm"></i></i><em id="dhRpmT"></em></div>
       </div>
@@ -319,6 +319,13 @@ export class DriveUI {
     };
     D.onHorn = () => A.sound?.horn();
     D.onEvent = (kind) => this.onEvent(kind);
+    D.onImpact = (kind, closing) => {
+      const now = performance.now();
+      if (now - (this.impT || 0) < 220 && kind !== 'rollover') return;
+      this.impT = now;
+      A.sound?.fx('impact', kind, Math.max(3, closing), D.vehicle === 'semi');
+      if (this.s.haptics && navigator.vibrate && closing > 2) navigator.vibrate(closing > 8 ? [90, 30, 60] : 40);
+    };
     window.addEventListener('gamepadconnected', () => A.drivingMode && A.toast('Gamepad connected — stick steers, triggers go and brake.'));
   }
 
@@ -329,7 +336,9 @@ export class DriveUI {
       deep: 'Too deep to ford: the van stops before the water reaches the sills (≈ 0.6 m).', slide: 'Sliding — not enough grip for that speed on this surface.',
       stuck: 'Wheelspin — this rear-wheel-drive van cannot climb that slope on this surface. Back down and take the track, or press T to get back on the road.',
       animal: 'Thump — you hit a wildlife. The van is dented but drivable; repairs cost cash. Slow down at dusk and watch the road edges.', crash: 'Crunch — you hit another vehicle. Keep your distance and use the horn.', reset: `Back on the road${this.D.road ? ` — ${this.D.road.edge.name}` : ''}.`, noRoad: 'No road within 1.4 km — try the map and drive toward a town.', cruiseLow: 'Cruise control needs a little speed first.', curve: 'Curve ahead — easing off the throttle.',
-      jackknife: 'Jack-knife! Ease off and straighten the wheel — never brake hard while the trailer is folding.', tipping: 'Tipping! Slow down — a loaded trailer rolls in a fast turn.', recovered: 'Recovery crew has stood the rig back up on the road.', rollover: 'Rolled over. Press T to get the rig upright back on the road (it costs a recovery fee).',
+      jackknife: 'Jack-knife! Ease off and straighten the wheel — never brake hard while the trailer is folding.', tipping: 'Tipping! Slow down — a loaded trailer rolls in a fast turn.', recovered: 'Recovery crew has stood the rig back up on the road.', rollover: this.D.vehicle === 'semi' ? 'Rolled over. Press T to get the rig upright back on the road (it costs a recovery fee).' : 'Rolled onto its side! Press T to call a tow truck — it stands the van up, repairs it and puts it back on the road for a fee.',
+      engineout: 'The engine bay is crushed and the engine has died. Press T to call a tow and repair (it costs cash).', overheat: 'Radiator damage — steam from the hood and less power. Find a station with a garage (⛽) to repair, or keep the speed down.',
+      towed: `Tow truck: van repaired and back on the road for ${money(250 + (this.D.towCost || 0))}.`,
     }[kind];
     if (msg) A.toast(msg);
     if (this.s.haptics && navigator.vibrate) {
@@ -339,11 +348,15 @@ export class DriveUI {
     const snd = this.app.sound;
     if (snd) {
       const heavy = this.D.vehicle === 'semi';
-      if (['tree', 'boulder', 'building', 'crash', 'animal', 'rollover', 'jackknife'].includes(kind)) snd.fx('impact', kind, Math.max(4, this.D.hitSpeed || Math.abs(this.D.v)), heavy);
-      else if (kind === 'recovered') snd.fx('doorclose', 1, 0.8);
+      // collisions play from onImpact (every hit, scaled by its speed); the rig's own events play here
+      if (heavy && ['rollover', 'jackknife'].includes(kind)) snd.fx('impact', kind, Math.max(4, this.D.hitSpeed || Math.abs(this.D.v)), heavy);
+      else if (kind === 'recovered' || kind === 'towed') snd.fx('doorclose', 1, 0.8);
     }
-    if (kind === 'animal') this.services?.penalty(120, 'repairs');
-    if (kind === 'crash') this.services?.penalty(60, 'a fender-bender');
+    if (this.D.vehicle === 'semi') {
+      if (kind === 'animal') this.services?.penalty(120, 'repairs');
+      if (kind === 'crash') this.services?.penalty(60, 'a fender-bender');
+    }
+    if (kind === 'towed') this.services?.penalty(250 + (this.D.towCost || 0), 'the tow and repairs');
     if (kind === 'recovered') {
       this.services?.penalty(900, 'the tow and recovery');
       this.D.rig.damage = Math.min(100, this.D.rig.damage + 15);
@@ -504,7 +517,7 @@ export class DriveUI {
       this.lastBrakeP = bp;
     }
     const jake = semi && D.rig.engineBrake && thr < 0.05 && D.rig.gear > 0 && Math.abs(D.v) > 6 ? Math.min(1, D.rig.rpm / 1800) : 0;
-    A.sound?.update(rpm, thr, Math.abs(D.v), D.surface.kind === 'road' || D.surface.kind === 'street' ? 0 : 1, true, Math.max(D.slip * 0.8, D.lock, D.spinning * 0.5), { jake });
+    A.sound?.update(rpm, thr, Math.abs(D.v), D.surface.kind === 'road' || D.surface.kind === 'street' ? 0 : 1, true, Math.max(D.slip * 0.8, D.lock, D.spinning * 0.5), { jake, cab: D.camMode === 'cockpit' ? 1 : 0.35, dead: D.engineOut, dmg: semi ? 0 : D.dmg.zone.front });
     this.tickAmbience(dt);
     // badges
     this.$('#dhCruise').setAttribute('aria-pressed', String(D.cruise.on));
@@ -523,6 +536,9 @@ export class DriveUI {
       const s = A.snap;
       const fuelL = semi ? D.rig.fuel : A.simState.fuelL;
       const fuelPct = semi ? D.rig.fuel / SPEC.fuelTank : (s && A.simState.fuelL / A.fuelCap) || 0;
+      const dmgPct = semi ? D.rig.damage : D.dmg.total * 100;
+      this.$('#dhDmg').style.width = `${Math.round(Math.max(0, Math.min(100, dmgPct)))}%`;
+      this.$('#dhDmgT').textContent = `${Math.round(dmgPct)} %`;
       this.$('#dhFuel').style.width = `${Math.round(Math.min(1, fuelPct) * 100)}%`;
       this.$('#dhFuelT').textContent = `${fuelL.toFixed(0)} L`;
       if (semi) this.tickSemi();

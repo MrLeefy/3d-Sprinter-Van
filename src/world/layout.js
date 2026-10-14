@@ -167,6 +167,20 @@ function driveway(L, lot, rng, len, street = 1) {
   L.furn('mailbox', lot.x + lot.w * 0.18, mz, faceRot(0, f));
 }
 
+/** Kerbside cars along an east–west street between x0 and x1 (traffic keeps right: south kerb faces east). */
+function kerbCars(L, rng, x0, x1, z, w, p, skip = []) {
+  for (let x = x0 + 6; x < x1 - 6; ) {
+    const kind = carKind(rng), len = CAR_LEN[kind];
+    const c = x + len / 2;
+    if (skip.some(([a, b]) => c > a - len && c < b + len)) {
+      x += 3;
+      continue;
+    }
+    for (const sd of [-1, 1]) if (rng() < p) L.car(c + (rng() - 0.5) * 0.3, z + sd * (w / 2 - 1.2), sd > 0 ? 0 : Math.PI, sd > 0 ? kind : carKind(rng));
+    x += len + 1 + rng() * 5;
+  }
+}
+
 /** A row of 90-degree parking bays starting at (x0, zc) running east, with stripes and some cars. */
 function bayRow(L, rng, x0, zc, n, bw, bl, p) {
   L.furn('bays', x0, zc, 0, n, bw, bl, (n * bw) / 2 + 2);
@@ -333,6 +347,7 @@ function fillBlockUrban(L, r, zone, rng, n, rho, big) {
 }
 
 function urban(L, world, n) {
+  const rb2 = (a, b, c) => hash2(a + 0.37, b - 0.11, n.seed + c * 17);
   const rng = L.rng;
   const G = world.grid(n);
   const big = n.kind === 'city';
@@ -470,6 +485,11 @@ function urban(L, world, n) {
     claim((b) => b.rho > 0.4 && zones.get(b.key) === 'houses', 'lot', 1);
   }
   for (const b of blocks) {
+    if (zones.get(b.key) === 'houses' && b.rho > (big ? 0.84 : 0.74) && hash2(b.k, b.m, n.seed + 9) < 0.75) zones.set(b.key, 'ranch');
+    // warehouses and silos along the railway in cities
+    if (big && railM != null && (b.m === railM || b.m + 1 === railM) && b.rho > 0.3 && ['houses', 'dense'].includes(zones.get(b.key))) zones.set(b.key, 'industrial');
+  }
+  for (const b of blocks) {
     const zone = zones.get(b.key);
     const rb = prng(Math.floor(hash2(b.k, b.m, n.seed) * 4294967296));
     L.block({ ...b.r }, zone, ['core', 'mid', 'industrial', 'lot', 'shops', 'courthouse', 'hospital'].includes(zone));
@@ -486,7 +506,7 @@ function urban(L, world, n) {
     L.zone('dump', rx + 28, rz - 2, 9, { name: 'RV dump station' });
     L.lot('shed', rx + 30, rz + 12, 8, 5, { floors: 1, fh: 3, pal: 7, roof: 'flat', sign: 'Office · Showers' });
   }
-  // lamps and street trees and parked cars along the main street and avenue
+  // ── Street life: lamps, signals, signs, crosswalks, parking, trees, furniture ──────────────
   const lampSpan = (ax, az, bx, bz, w, vertical) => {
     const len = Math.hypot(bx - ax, bz - az), cnt = Math.floor(len / 34);
     for (let i = 0; i <= cnt; i++) {
@@ -498,40 +518,134 @@ function urban(L, world, n) {
     }
   };
   for (const s of L.streets) if (s.kind === 'main') lampSpan(s.ax, s.az, s.bx, s.bz, s.w, s.ax === s.bx);
+  const rhoAt = (x, z) => Math.hypot((x - cx) / Rp, (z - cz) / Rz);
   for (const bl of blocks) {
-    // corner lamps for the minor streets
-    if (bl.m % 2 === 0 && bl.k % 2 === 0) L.prop('lamps', [bl.r.ox0 + 3, bl.r.oz0 + 3, 0]);
+    const r = bl.r, zn = zones.get(bl.key);
+    if (zn === 'industrial' || zn === 'ranch' || bl.rho > (big ? 0.78 : 0.66)) continue;
+    // a street lamp mid-block on alternating edges, a hydrant on the kerb, the odd bus shelter on Main St
+    if (rb2(bl.k, bl.m, 1) < 0.85) L.prop('lamps', [(r.x0 + r.x1) / 2 + 8, (bl.k + bl.m) % 2 ? r.z0 - 1.2 : r.z1 + 1.2, (bl.k + bl.m) % 2 ? Math.PI / 2 : -Math.PI / 2]);
+    if (rb2(bl.k, bl.m, 2) < 0.5) L.furn('hydrant', r.x0 + 5 + rb2(bl.k, bl.m, 3) * (r.x1 - r.x0 - 10), rb2(bl.k, bl.m, 4) < 0.5 ? r.z0 - 3.0 : r.z1 + 3.0);
+    if (bl.m === 0 && bl.k % 2 === 0 && rb2(bl.k, bl.m, 5) < 0.7) L.furn('bus', (r.x0 + r.x1) / 2 - 14, r.z0 - SW * 0.5 - 0.1, faceRot(0, -1), 0, 0, 0, 3);
+    if (bl.m === -1 && bl.k % 2 !== 0 && rb2(bl.k, bl.m, 6) < 0.7) L.furn('bus', (r.x0 + r.x1) / 2 - 14, r.z1 + SW * 0.5 + 0.1, faceRot(0, 1), 0, 0, 0, 3);
   }
-  for (const s of L.streets.filter((q) => q.kind === 'main')) {
-    const horiz = s.az === s.bz;
-    const len = horiz ? s.bx - s.ax : s.bz - s.az;
-    for (let t = 6; t < len - 6; t += 7.2) {
-      for (const sd of [-1, 1]) {
-        if (rng() < 0.55) continue;
-        const along = (horiz ? s.ax : s.az) + t;
-        const off = sd * (s.w / 2 - 2.1);
-        if (horiz) L.car(along, s.az + off, sd > 0 ? Math.PI : 0, rng() < 0.4 ? 1 : 0);
-        else L.car(s.ax + off, along, sd > 0 ? Math.PI / 2 : -Math.PI / 2, 0);
+  // intersections
+  const hasRail = railM != null;
+  for (const [k, halfV] of hasV) {
+    for (const [m, halfH] of hasH) {
+      if (m === railM) continue;
+      const ix = cx + k * G.bx, iz = cz + m * G.bz, wx = wV(k), wz = wH(m);
+      if (Math.abs(iz - cz) > halfV - wz / 2 - 1 || Math.abs(ix - cx) > halfH - wx / 2 - 1) continue;
+      const rI = rhoAt(ix, iz), major = k === 0 || m === 0;
+      const signalised = k === 0 && m === 0 ? true : big ? (major && rI < 0.8) || (rI < 0.5 && (k + m) % 2 === 0) : false;
+      const fourWay = !major && !signalised && rb2(k, m, 7) < 0.25;
+      const hx = wx / 2 + 1.3, hz = wz / 2 + 1.3;
+      if (signalised) {
+        const greenH = m === 0 ? true : k === 0 ? false : (k + m) % 2 === 0;
+        for (const [sx, sz, rot, alongX] of [[1, 1, Math.PI, true], [1, -1, -Math.PI / 2, false], [-1, 1, Math.PI / 2, false], [-1, -1, 0, true]]) {
+          L.furn('signal', ix + sx * hx, iz + sz * hz, rot, alongX ? (greenH ? 0 : 1) : greenH ? 1 : 0, alongX ? 0 : -sx, alongX ? -sz : 0, 2);
+        }
+      } else {
+        const stopH = k === 0 || fourWay, stopV = (m === 0 && k !== 0) || fourWay;
+        if (stopH) {
+          L.furn('stop', ix - hx, iz + hz, Math.PI, 0, 0, 0, 2);
+          L.furn('stop', ix + hx, iz - hz, 0, 0, 0, 0, 2);
+        }
+        if (stopV) {
+          L.furn('stop', ix + hx, iz + hz, -Math.PI / 2, 0, 0, 0, 2);
+          L.furn('stop', ix - hx, iz - hz, Math.PI / 2, 0, 0, 0, 2);
+        }
+      }
+      if (signalised || (rI < (big ? 0.7 : 0.45) && Math.abs(k) <= 3 && Math.abs(m) <= 2)) {
+        L.furn('cross', ix, iz - wz / 2 - 1.9, 0, wx, 0, 0, 2);
+        L.furn('cross', ix, iz + wz / 2 + 1.9, 0, wx, 0, 0, 2);
+        L.furn('cross', ix - wx / 2 - 1.9, iz, 0, wz, 1, 0, 2);
+        L.furn('cross', ix + wx / 2 + 1.9, iz, 0, wz, 1, 0, 2);
       }
     }
   }
+  // parked cars: parallel along every street, angled bays on one side of a city's Main St
+  const rowZs = [...hasH.keys()].map((m) => ({ c: cz + m * G.bz, w: wH(m) }));
+  const parkLine = (horiz, line, lo, hi, w, pLo, pHi, angled) => {
+    const cross = horiz ? avenueXs : rowZs;
+    for (const sd of [-1, 1]) {
+      const p = sd < 0 ? pLo : pHi;
+      if (p <= 0) continue;
+      const ang = angled && sd > 0;
+      let t = lo + 6;
+      while (t < hi - 6) {
+        const kind = carKind(rng), len = CAR_LEN[kind];
+        const step = ang ? 3.5 : len + 0.7;
+        const c = t + step / 2;
+        const q = cross.find((o) => Math.abs(o.c - c) < o.w / 2 + 7 + step / 2);
+        if (q) {
+          t = Math.max(t + 1, q.c + q.w / 2 + 7);
+          continue;
+        }
+        const px = horiz ? c : line + sd * (w / 2 - (ang ? 2.4 : 1.2)), pz = horiz ? line + sd * (w / 2 - (ang ? 2.4 : 1.2)) : c;
+        if (rng() < p * clamp(1.3 - rhoAt(px, pz), 0, 1) && rhoAt(px, pz) < 0.93) {
+          let rot;
+          if (ang) rot = sd > 0 ? -Math.PI / 4 : (3 * Math.PI) / 4; // east–west streets only
+          else rot = horiz ? (sd > 0 ? 0 : Math.PI) : sd > 0 ? Math.PI / 2 : -Math.PI / 2;
+          L.car(px + (horiz ? 0 : (rng() - 0.5) * 0.3), pz + (horiz ? (rng() - 0.5) * 0.3 : 0), rot + (rng() - 0.5) * (ang ? 0.2 : 0.07), kind);
+        }
+        t += step + (ang ? 0 : rng() * 0.9);
+      }
+    }
+  };
+  for (const s of L.streets) {
+    if (s.kind === 'gravel') continue;
+    const horiz = s.az === s.bz;
+    const lo = horiz ? Math.min(s.ax, s.bx) : Math.min(s.az, s.bz), hi = horiz ? Math.max(s.ax, s.bx) : Math.max(s.az, s.bz), line = horiz ? s.az : s.ax;
+    if (s.kind === 'main') parkLine(horiz, line, lo, hi, s.w, big && horiz ? 0.55 : 0.45, big && horiz ? 0.6 : 0.45, big && horiz);
+    else if (s.id % 2) parkLine(horiz, line, lo, hi, s.w, 0, 0.28, false);
+    else parkLine(horiz, line, lo, hi, s.w, 0.28, 0, false);
+  }
+  // street trees on the Main St / Center Ave sidewalks, clear of crossings and lamps
+  for (const s of L.streets.filter((q) => q.kind === 'main')) {
+    const horiz = s.az === s.bz, lo = horiz ? Math.min(s.ax, s.bx) : Math.min(s.az, s.bz), hi = horiz ? Math.max(s.ax, s.bx) : Math.max(s.az, s.bz);
+    const cross = horiz ? avenueXs : rowZs;
+    for (let t = lo + 10; t < hi - 10; t += big ? 13 : 17) {
+      if (cross.some((o) => Math.abs(o.c - t) < o.w / 2 + 10)) continue;
+      const sd = Math.floor((t - lo) / (big ? 13 : 17)) % 2 ? 1 : -1;
+      const off = sd * (s.w / 2 + 2.3);
+      const x = horiz ? t : s.ax + off, z = horiz ? s.az + off : t;
+      if (rhoAt(x, z) < 0.9 && rb2(Math.floor(x), Math.floor(z), 11) < 0.7) L.tree(x, z, 0.65 + rb2(Math.floor(x), Math.floor(z), 12) * 0.25, 1);
+    }
+  }
+  void hasRail;
 }
 
 // ── Villages ────────────────────────────────────────────────────────────────
 function village(L, world, n) {
   const rng = L.rng;
   const { x: cx, z: cz, Rp } = n;
-  const wMain = 10;
+  const wMain = 12, wDepot = 10, wRail = 8;
   L.street(cx - Rp, cz, cx + Rp, cz, wMain, 'main', 'Main St');
   const half = n.Rz;
-  L.street(cx, cz - half, cx, cz + half, 8, 'minor', 'Depot Rd');
+  L.street(cx, cz - half, cx, cz + half, wDepot, 'minor', 'Depot Rd');
   L.lot('church', cx + 16, cz - wMain / 2 - 18, 10, 20, { floors: 2, fh: 4.2, pal: 0, roof: 'gable', ridge: 'z' });
-  const ex = cx + (hash2(n.i, n.j, 93) < 0.5 ? 1 : -1) * (Rp - 26);
-  L.lot('elevator', ex, cz + wMain / 2 + 22, 12, 14, { h: 30, pal: 0 });
-  L.lot('silo', ex + 11, cz + wMain / 2 + 20, 7, 7, { h: 20, r: 3.5, pal: 0 });
+  const eside = hash2(n.i, n.j, 93) < 0.5 ? 1 : -1;
+  const ex = cx + eside * (Rp - 26);
+  const zE = cz + wMain / 2 + 22, railZ = zE + 14;
+  L.lot('elevator', ex, zE, 12, 14, { h: 30, pal: 0 });
+  L.lot('silo', ex + 11, zE - 2, 7, 7, { h: 20, r: 3.5, pal: 0 });
   L.lot('watertower', cx - 40, cz - 32, 8, 8, { h: 24, r: 4, pal: 7 });
+  // railway behind the elevator, a depot beside Depot Rd and a few freight cars
+  L.street(cx - Rp - 50, railZ, cx + Rp + 50, railZ, wRail, 'gravel', 'Railroad Ave');
+  L.rail(cx - Rp - 50, railZ, cx + Rp + 50);
+  L.lot('depot', cx + 22, railZ - wRail / 2 - 5.5, 15, 7, { floors: 1, h: 4.2, pal: 4, roof: 'hip', sign: `${n.name} Depot` });
+  L.furn('bench', cx + 22, railZ - wRail / 2 - 1.2, faceRot(0, 1), 0, 0, 0, 2);
+  L.furn('xbuck', cx + wDepot / 2 + 1.8, railZ + wRail / 2 + 3, faceRot(0, 1), 0, 0, 0, 2);
+  L.furn('xbuck', cx - wDepot / 2 - 1.8, railZ - wRail / 2 - 3, faceRot(0, -1), 0, 0, 0, 2);
+  const nCars = 2 + Math.floor(rng() * 3);
+  for (let i = 0; i < nCars; i++) L.lot('railcar', ex - eside * (20 + i * 15), railZ, 13.5, 3.1, { floors: 1, h: 4.1, pal: Math.floor(rng() * 4), extra: { car: Math.floor(rng() * 3) } });
   const store = hash2(n.i, n.j, 94) < 0.8;
   if (store) L.reserved = [{ x0: cx - 34, x1: cx + 2, z0: cz - wMain / 2 - 22, z1: cz - wMain / 2 }];
+  if (hash2(n.i, n.j, 100) < 0.5) {
+    const dx = cx - 30;
+    L.lot('diner', dx, cz + wMain / 2 + 11, 14, 9, { floors: 1, h: 4, pal: 0, roof: 'flat', sign: pick(rng, ['Depot Diner', 'Big Sky Diner', 'Rail Stop Cafe']) }).facing = 'z-';
+    bayRow(L, rng, dx - 7.25, cz + wMain / 2 + 4.5 - 2.9 + 0.3, 5, 2.9, 5.4, 0.5);
+  }
   for (const sd of [-1, 1]) {
     let x = cx - Rp + 14;
     while (x < cx + Rp - 22) {
@@ -546,6 +660,10 @@ function village(L, world, n) {
       if (!L.hit(x + w / 2, zc, w - 3, dd)) {
         const lot = L.lot(k, x + w / 2, zc, w - 3, dd, { floors: 1, fh: 3.4, pal: Math.floor(rng() * 8), roof: k === 'shop' ? 'flat' : 'gable', sign: k === 'shop' ? pick(rng, BUSINESSES) : null });
         lot.facing = sd < 0 ? 'z+' : 'z-';
+        if (k === 'house') {
+          driveway(L, lot, rng, Math.max(5, Math.abs(zc - cz) - dd / 2 - wMain / 2));
+          if (rng() < 0.5) L.furn('fence', lot.x, zc + sd * (dd / 2 + 0.6), 0, w - 3, 0, 0, w / 2 + 1);
+        }
         if (rng() < 0.7) L.tree(x + w / 2 + (rng() - 0.5) * 8, zc + sd * 10, 0.8 + rng() * 0.7);
       }
       x += w + 2 + rng() * 6;
@@ -556,20 +674,33 @@ function village(L, world, n) {
     L.zone('fuel', cx - 12, cz - wMain / 2 - 11, 10, { name: `${n.name} Pump & Pantry`, diesel: true });
     L.zone('water', cx - 22, cz - wMain / 2 - 11, 7, { name: 'Potable water fill' });
     L.zone('shop', cx - 4, cz - wMain / 2 - 14, 10, { name: pick(rng, ['General Store', 'Village Market', 'Dry Goods & Groceries']) });
+    L.furn('pylon', cx - 20, cz - wMain / 2 - 2.6, faceRot(0, 1), 0, 0, 0, 2);
+    if (rng() < 0.6) L.car(cx - 14, cz - wMain / 2 - 11 + 2.2, 0, carKind(rng));
   }
+  kerbCars(L, rng, cx - Rp * 0.8, cx + Rp * 0.8, cz, wMain, 0.22, [[cx - wDepot / 2 - 8, cx + wDepot / 2 + 8]]);
+  // Depot Rd meets Main St: stop signs on Depot Rd, a crosswalk each side
+  const hx = wDepot / 2 + 1.3, hz = wMain / 2 + 1.3;
+  L.furn('stop', cx + hx, cz + hz, -Math.PI / 2, 0, 0, 0, 2);
+  L.furn('stop', cx - hx, cz - hz, Math.PI / 2, 0, 0, 0, 2);
+  L.furn('cross', cx - wDepot / 2 - 1.9, cz, 0, wMain, 1, 0, 2);
+  L.furn('cross', cx + wDepot / 2 + 1.9, cz, 0, wMain, 1, 0, 2);
+  L.furn('hydrant', cx + 9, cz - wMain / 2 - 1.5);
+  L.furn('flag', cx + 8, cz - wMain / 2 - 3.5, faceRot(0, 1), 8, 0, 0, 3);
   for (let i = 0; i < 10; i++) {
     const t = (i / 9) * 2 - 1;
     L.prop('lamps', [cx + t * Rp * 0.8, cz + wMain / 2 + 1.2, -Math.PI / 2]);
   }
+  for (let i = 0; i < 5; i++) L.ped(cx - 40 + i * 20 + rng() * 6, cz + wMain / 2 + 1.6, 1, 0, 10 + rng() * 14, 0.8 + rng() * 0.5, rng(), Math.floor(rng() * 1000));
 }
 
 // ── Farms / ranches ─────────────────────────────────────────────────────────
 function farm(L, world, n) {
   const rng = L.rng;
   const { x: cx, z: cz } = n;
-  L.street(cx - 36, cz, cx + 36, cz, 5.6, 'gravel', 'Ranch Rd');
-  L.street(cx, cz - 36, cx, cz + 36, 5.6, 'gravel', 'Ranch Rd');
-  L.lot('house', cx - 15, cz + 13, 13, 9.5, { floors: 1 + (rng() < 0.4 ? 1 : 0), fh: 3.2, pal: Math.floor(rng() * 8), roof: 'gable', ridge: 'x' });
+  L.street(cx - 36, cz, cx + 36, cz, 6.4, 'gravel', 'Ranch Rd');
+  L.street(cx, cz - 36, cx, cz + 36, 6.4, 'gravel', 'Ranch Rd');
+  const house = L.lot('house', cx - 15, cz + 13, 13, 9.5, { floors: 1 + (rng() < 0.4 ? 1 : 0), fh: 3.2, pal: Math.floor(rng() * 8), roof: 'gable', ridge: 'x' });
+  house.facing = 'z-';
   L.lot('barn', cx + 15, cz - 12, 17, 12, { h: 8.5, pal: 4, roof: 'gambrel', ridge: 'x' });
   L.lot('warehouse', cx + 20, cz + 14, 18, 10, { h: 6, pal: 9, roof: 'lowgable' });
   for (let i = 0; i < 3 + Math.floor(rng() * 2); i++) L.lot('bin', cx - 22 + i * 9, cz - 22, 7, 7, { h: 6.8, r: 3.5, pal: 7 });
@@ -577,6 +708,13 @@ function farm(L, world, n) {
   for (let i = 0; i < 14; i++) L.tree(cx - 34 + i * 3.1, cz - 31 + (rng() - 0.5) * 2, 1 + rng() * 0.5, 0);
   for (let i = 0; i < 9; i++) L.tree(cx - 33 + (rng() - 0.5) * 2, cz - 28 + i * 6, 1 + rng() * 0.5, 0);
   L.prop('misc', [cx + 29, cz + 2, 0, 'corral']);
+  // pickup by the house, a tractor by the barn, wire fence along the road frontage and a roadside mailbox
+  L.car(cx - 15 + 3, cz + 5.2 - 2.5, faceRot(0, -1), 4);
+  L.car(cx + 4, cz - 4, faceRot(1, 0), 5);
+  L.furn('mailbox', cx + 3.8, cz - 3.6, faceRot(0, -1));
+  L.furn('fence', cx - 20, cz + 33, 0, 36, 1, 0, 20);
+  L.furn('fence', cx + 20, cz + 33, 0, 36, 1, 0, 20);
+  L.furn('fence', cx + 33, cz - 18, 0, 30, 1, 1, 16);
   if (rng() < 0.5) L.zone('water', cx - 4, cz + 20, 7, { name: `${n.name} well` });
 }
 
@@ -584,31 +722,60 @@ function farm(L, world, n) {
 function lodge(L, world, n) {
   const rng = L.rng;
   const { x: cx, z: cz } = n;
-  L.street(cx - 48, cz, cx + 48, cz, 6, 'gravel', 'Lodge Rd');
-  L.street(cx, cz - 48, cx, cz + 48, 6, 'gravel', 'Lodge Rd');
+  L.street(cx - 48, cz, cx + 48, cz, 6.4, 'gravel', 'Lodge Rd');
+  L.street(cx, cz - 48, cx, cz + 48, 6.4, 'gravel', 'Lodge Rd');
   L.lot('lodge', cx + 16, cz - 16, 26, 14, { floors: 2, fh: 3.8, pal: 6, roof: 'gable', ridge: 'x', sign: n.name });
   for (let i = 0; i < 5; i++) L.lot('cabin', cx - 30 + (i % 3) * 14, cz + 18 + Math.floor(i / 3) * 14, 7, 6, { floors: 1, fh: 3, pal: 6, roof: 'gable', ridge: 'x' });
   for (let i = 0; i < 18; i++) L.tree(cx + (rng() - 0.5) * 100, cz + (rng() - 0.5) * 100, 1.1 + rng() * 0.8, 0);
   L.zone('shop', cx + 12, cz - 4, 12, { name: `${n.name} Restaurant` });
+  bayRow(L, rng, cx + 16 - 8.7, cz - 16 + 7 + 3.6, 6, 2.9, 5.4, 0.55);
+  for (let i = 0; i < 5; i++) if (rng() < 0.5) L.car(cx - 30 + (i % 3) * 14 + 6.4, cz + 18 + Math.floor(i / 3) * 14 + 0.3, faceRot(1, 0), carKind(rng));
+  L.furn('flag', cx + 3, cz - 6, faceRot(0, 1), 9, 0, 0, 3);
+  L.furn('bench', cx + 16, cz - 7.8, faceRot(0, 1), 0, 0, 0, 2);
+  L.furn('mailbox', cx + 3.8, cz + 3.6, faceRot(0, -1));
 }
 
 // ── Truck stop / travel plaza ───────────────────────────────────────────────
+// South: a truck lot with 4 m trailer bays (24 m deep) off a 27 m manoeuvring aisle. North: a
+// diesel canopy that a 22 m rig can drive straight through, the travel store, diner and showers.
 function truckstop(L, world, n) {
   const rng = L.rng;
-  const { x: cx, z: cz } = n;
-  L.street(cx - 56, cz, cx + 56, cz, 10, 'main', 'Highway Frontage');
-  L.block({ x0: cx - 54, x1: cx + 54, z0: cz - 44, z1: cz - 6, ox0: cx - 54, ox1: cx + 54, oz0: cz - 44, oz1: cz - 6 }, 'lot', true, false);
-  L.block({ x0: cx - 54, x1: cx + 54, z0: cz + 6, z1: cz + 44, ox0: cx - 54, ox1: cx + 54, oz0: cz + 6, oz1: cz + 44 }, 'lot', true, false);
-  L.lot('canopy', cx - 10, cz - 16, 36, 14, { h: 5.8, solid: false, pal: 7, extra: { pumps: 6 } });
-  L.lot('store', cx - 32, cz - 34, 22, 11, { floors: 1, fh: 3.8, pal: 5, roof: 'flat', sign: n.name });
-  L.lot('shed', cx + 18, cz - 34, 22, 10, { floors: 1, fh: 3.6, pal: 7, roof: 'flat', sign: pick(rng, BUSINESSES) });
-  for (let i = 0; i < 7; i++) L.car(cx - 44 + i * 7.2, cz + 24, Math.PI / 2, 2);
-  for (let i = 0; i < 5; i++) L.car(cx + 6 + i * 7.5, cz + 33, Math.PI / 2, 0);
-  L.zone('fuel', cx - 10, cz - 16, 14, { name: n.name, diesel: true, trucks: true });
-  L.zone('water', cx + 22, cz - 20, 8, { name: 'Potable water fill' });
-  L.zone('dump', cx + 34, cz - 26, 8, { name: 'RV dump station' });
-  L.zone('shop', cx - 32, cz - 26, 12, { name: 'Travel Store' });
-  for (let i = 0; i < 6; i++) L.prop('lamps', [cx - 50 + i * 20, cz + 6, 0]);
+  const { x: cx, z: cz, Rp } = n;
+  const hw = Math.min(Rp - 3, 54);
+  L.street(cx - Rp, cz, cx + Rp, cz, 14, 'main', 'Highway Frontage');
+  L.block({ x0: cx - hw, x1: cx + hw, z0: cz - 56, z1: cz - 8, ox0: cx - hw, ox1: cx + hw, oz0: cz - 56, oz1: cz - 8 }, 'lot', true, false);
+  L.block({ x0: cx - hw, x1: cx + hw, z0: cz + 8, z1: cz + 58, ox0: cx - hw, ox1: cx + hw, oz0: cz + 8, oz1: cz + 58 }, 'lot', true, false);
+  const gx = cx - 8, gz = cz - 17;
+  L.lot('canopy', gx, gz, 40, 16, { h: 6, solid: false, pal: 7, extra: { pumps: 8 } });
+  L.lot('store', cx - 31, cz - 43, 26, 12, { floors: 1, fh: 3.8, pal: 5, roof: 'flat', sign: n.name });
+  L.lot('diner', cx + 4, cz - 43, 20, 11, { floors: 1, h: 4, pal: 0, roof: 'flat', sign: pick(rng, ['Trucker Diner', 'Eat Here · Big Sky', 'Hi-Line Diner', 'Last Stop Cafe']) });
+  L.lot('shed', cx + 30, cz - 44, 18, 9, { floors: 1, fh: 3.6, pal: 7, roof: 'flat', sign: 'Showers · Laundry · Scales' });
+  // truck bays
+  const bw = 4, nb = Math.floor((2 * hw - 4) / bw), bx0 = cx - (nb * bw) / 2;
+  L.furn('bays', bx0, cz + 46, 0, nb, bw, 24, (nb * bw) / 2 + 2);
+  const nose = cz + 34.6;
+  for (let i = 0; i < nb; i++) {
+    if (rng() < 0.42) continue;
+    const kind = rng() < 0.12 ? 5 : 6 + Math.floor(rng() * 3);
+    const x = bx0 + (i + 0.5) * bw + (rng() - 0.5) * 0.25;
+    const z0 = (kind === 5 ? nose + 1.5 : nose) + 7.35;
+    L.car(x, z0, faceRot(0, -1) + (rng() - 0.5) * 0.03, kind);
+  }
+  // fuelling: a rig under the canopy in the north lane, a pickup in the south lane
+  L.car(gx + 3.9 + (rng() - 0.5) * 6, gz - 4.2, 0, 6 + Math.floor(rng() * 3));
+  if (rng() < 0.7) L.car(gx + 14, gz + 4.2, Math.PI, carKind(rng));
+  bayRow(L, rng, cx - 31 - 8.7, cz - 43 + 6 + 3.0, 6, 2.9, 5.4, 0.6);
+  L.zone('fuel', gx, gz, 22, { name: n.name, diesel: true, trucks: true });
+  L.zone('water', cx + 24, cz - 24, 8, { name: 'Potable water fill' });
+  L.zone('dump', cx + 38, cz - 26, 8, { name: 'RV dump station' });
+  L.zone('shop', cx - 31, cz - 35, 12, { name: 'Travel Store' });
+  L.furn('pylon', cx + 40, cz - 9.6, faceRot(0, 1), 0, 0, 0, 2);
+  L.furn('flag', cx + 46, cz - 12, faceRot(0, 1), 14, 1, 0, 3);
+  for (let i = 0; i < 6; i++) L.prop('lamps', [cx - 50 + i * 20, cz + 8.6, Math.PI / 2 * -1]);
+  for (let i = 0; i < 5; i++) L.prop('lamps', [bx0 + 8 + i * 22, cz + 31, Math.PI / 2]);
+  for (let i = 0; i < 3; i++) L.ped(cx - 30 + i * 22, cz - 36.5, 1, 0, 10 + rng() * 10, 0.9 + rng() * 0.5, rng(), Math.floor(rng() * 1000));
+  L.furn('bench', cx + 4, cz - 36.3, faceRot(0, 1), 0, 0, 0, 2);
+  L.furn('hydrant', cx + 18, cz - 36.4);
 }
 
 // ── Campground ──────────────────────────────────────────────────────────────
@@ -628,6 +795,7 @@ function camp(L, world, n) {
     const a = ((i + 0.5) / 10) * Math.PI * 2;
     const px = cx + Math.cos(a) * (R + 9), pz = cz + Math.sin(a) * (R + 9);
     L.prop('misc', [px, pz, a, 'campsite']);
+    if (i % 3 === 1) L.car(cx + Math.cos(a) * (R + 3.2), cz + Math.sin(a) * (R + 3.2), a + Math.PI / 2, rng() < 0.5 ? 3 : carKind(rng));
   }
   L.lot('shed', cx, cz, 9, 6, { floors: 1, fh: 3, pal: 6, roof: 'gable', sign: 'Restrooms · Showers' });
   for (let i = 0; i < 40; i++) {
@@ -645,6 +813,8 @@ function junction(L, world, n) {
   const { x: cx, z: cz } = n;
   L.street(cx - 14, cz, cx + 14, cz, 9, 'minor', '');
   L.street(cx, cz - 14, cx, cz + 14, 9, 'minor', '');
+  L.furn('stop', cx + 7.4, cz + 6.4, -Math.PI / 2, 0, 0, 0, 2);
+  L.furn('stop', cx - 7.4, cz - 6.4, Math.PI / 2, 0, 0, 0, 2);
   if (hash2(n.i, n.j, 96) < 0.3) {
     L.lot('shed', cx + 24, cz - 18, 9, 6, { floors: 1, fh: 3, pal: 7, roof: 'gable', sign: pick(L.rng, BUSINESSES) });
     L.tree(cx - 24, cz + 20, 1, 0);

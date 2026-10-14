@@ -7,6 +7,9 @@ import { GB, K, SignAtlas, buildLot, geometryFromBuilder, makeBuildingMaterial }
 import { RC } from './landMaterials.js';
 import { conifer, broadleaf } from './vegetation.js';
 import { prng, hashStr } from '../world/noise.js';
+import { drawFurniture, drawRail } from './furniture.js';
+import { ParkedVehicles, carCircles } from './parked.js';
+import { Pedestrians } from './peds.js';
 
 const RADIUS = { high: 620, medium: 480, low: 340, lite: 250 };
 const lin = (c) => c.map((v) => Math.pow(v, 2.2));
@@ -15,8 +18,6 @@ const SW = 3.4; // sidewalk width (matches the layout's block inset)
 const wrap = (v) => v - 1000 * Math.floor(v / 1000);
 const decode = (key) => [Math.floor(key / 65536) - 32768, (key % 65536) - 32768];
 
-// ── Cars (instanced, body tinted per instance) ───────────────────────────────
-const CAR_COLS = [[0.92, 0.92, 0.9], [0.7, 0.72, 0.74], [0.12, 0.12, 0.13], [0.62, 0.1, 0.09], [0.12, 0.22, 0.45], [0.16, 0.34, 0.22], [0.55, 0.45, 0.3], [0.35, 0.37, 0.4], [0.85, 0.7, 0.15]].map(lin);
 
 function boxGeo(parts) {
   const P = [], N = [], C = [], B = [], GL = [], I = [];
@@ -308,14 +309,13 @@ export class Towns {
     this.conifers = mk(conifer(), vm.pine, 1400);
     this.broads = mk(broadleaf(), vm.broad, 2400);
     this.conifers.receiveShadow = this.broads.receiveShadow = true;
-    const cmat = carMaterial(this.season);
-    this.cars = [0, 1, 2].map((k) =>
-      mk(carGeometry(k), cmat, 700, (m) => {
-        m.geometry.setAttribute('aCarCol', new THREE.InstancedBufferAttribute(new Float32Array(700 * 3), 3));
-        m.castShadow = true;
-        m.receiveShadow = true;
-      }),
-    );
+    // parked vehicles (detailed models, instanced, distance LOD) and sidewalk pedestrians
+    this.vgroup = new THREE.Group();
+    this.vgroup.name = 'town-vehicles';
+    this.group.add(this.vgroup);
+    this.parked = new ParkedVehicles(this.vgroup, this.season, this.atlas);
+    this.peds = new Pedestrians(this.vgroup, this.season);
+    this.shadowOn = false;
     this.season.listeners.push(() => this.onSeason());
   }
 
@@ -338,12 +338,16 @@ export class Towns {
       if (t.gnd) t.gnd.material = mat || this.land.roadMat;
     }
     this.conifers.visible = this.broads.visible = !mat;
-    for (const c of this.cars) c.visible = !mat;
+    this.vgroup.visible = !mat;
   }
 
   tick() {
     const hi = this.stage.quality === 'high';
     for (const t of this.tiles.values()) if (t.bld) t.bld.castShadow = hi && t.near;
+    if (hi !== this.shadowOn) {
+      this.shadowOn = hi;
+      this.parked.setCastShadow(hi);
+    }
   }
 
   // ── Streaming ──────────────────────────────────────────────────────────────
@@ -388,6 +392,8 @@ export class Towns {
       this.dirty = true;
     }
     if (this.dirty && (!this.queue.length || this.dirtyAge++ > 20)) this.rebuildInstances();
+    this.parked.update(x, z);
+    this.peds.update(x, z);
   }
 
   // ── One tile ───────────────────────────────────────────────────────────────
@@ -397,7 +403,7 @@ export class Towns {
     const t = L.tiles.get(key);
     const gb = new GB(ox, oz), gr = new Ground(ox, oz, W);
     const y0 = node.h;
-    const tile = { node, tx, tz, key, trees: [], cars: [], bld: null, gnd: null, near: d < 220 };
+    const tile = { node, tx, tz, key, trees: [], cars: [], peds: [], bld: null, gnd: null, near: d < 220 };
     // lots (assigned by their centre)
     for (const id of t.lots) {
       const lot = L.lots[id];
@@ -414,6 +420,17 @@ export class Towns {
       const h = W.heightAt(p[0], p[1]);
       if (p[3] === 'corral') corral(gb, p[0], p[1], h);
       else if (p[3] === 'campsite') campsite(gb, p[0], p[1], p[2], h, id);
+      else drawFurniture(gb, this.atlas, p, p[3] === 'cross' || p[3] === 'bays' ? y0 : h);
+    }
+    for (const id of t.rails) {
+      const [ax, az, bx] = L.rails[id];
+      if (az < oz || az >= oz + TILE) continue;
+      const a = Math.max(ax, ox), b = Math.min(bx, ox + TILE);
+      if (b > a) drawRail(gb, a, b, az, y0);
+    }
+    for (const id of t.peds) {
+      const w = L.peds[id];
+      if (inTile(w[0], w[1])) tile.peds.push([...w, y0 + 0.09]);
     }
     for (const id of t.signs) {
       const sg = L.signs[id];
@@ -448,6 +465,13 @@ export class Towns {
     for (const p of plan.patches) {
       if (!inTile(p.x, p.z)) continue;
       gr.patch(p.x - p.wx / 2, p.x + p.wx / 2, p.z - p.wz / 2, p.z + p.wz / 2, RC.street, y0 + 0.078, p.w);
+    }
+    for (const id of t.lots) {
+      const lot = L.lots[id];
+      if (!lot.drive || !inTile(lot.x, lot.z)) continue;
+      const f = lot.facing === 'z-' ? -1 : 1, gx = lot.x - lot.w / 2 + lot.w * 0.76;
+      const fz = f > 0 ? lot.z + lot.d / 2 : lot.z - lot.d / 2;
+      gr.rect(gx - 1.5, gx + 1.5, Math.min(fz, fz + f * lot.drive), Math.max(fz, fz + f * lot.drive), RC.pavement, y0 + 0.11);
     }
     for (const id of t.blocks) {
       const b = L.blocks[id];
@@ -495,8 +519,7 @@ export class Towns {
     this.dirtyAge = 0;
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(), eu = new THREE.Euler();
     let nc = 0, nb = 0;
-    const cn = [0, 0, 0];
-    const col = new THREE.Color();
+    const vehicles = [], walkers = [];
     for (const t of this.tiles.values()) {
       for (const [x, y, z, sc, type, id] of t.trees) {
         const rn = prng(Math.floor(x * 31 + z * 17 + id) >>> 0);
@@ -517,28 +540,14 @@ export class Towns {
           this.broads.setMatrixAt(nb++, m4.compose(p, q, s));
         }
       }
-      for (const [x, y, z, rot, kind, rn] of t.cars) {
-        const mesh = this.cars[kind] || this.cars[0], i = cn[kind] || 0;
-        if (i >= 700) continue;
-        p.set(x, y, z);
-        q.setFromEuler(eu.set(0, rot, 0));
-        s.set(1, 1, 1);
-        mesh.setMatrixAt(i, m4.compose(p, q, s));
-        const c = CAR_COLS[Math.floor(rn * CAR_COLS.length) % CAR_COLS.length];
-        const a = mesh.geometry.attributes.aCarCol;
-        a.setXYZ(i, c[0], c[1], c[2]);
-        cn[kind] = i + 1;
-      }
+      for (const c of t.cars) vehicles.push(c);
+      for (const w of t.peds) walkers.push(w);
     }
     this.conifers.count = nc;
     this.broads.count = nb;
     this.conifers.instanceMatrix.needsUpdate = this.broads.instanceMatrix.needsUpdate = true;
-    this.cars.forEach((m, k) => {
-      m.count = cn[k];
-      m.instanceMatrix.needsUpdate = true;
-      m.geometry.attributes.aCarCol.needsUpdate = true;
-    });
-    void col;
+    this.parked.setList(vehicles);
+    this.peds.setList(walkers);
   }
 
   // ── Queries (collision, services) ──────────────────────────────────────────
@@ -552,6 +561,14 @@ export class Towns {
     for (const t of this.tiles.values()) {
       if (Math.abs((t.tx + 0.5) * TILE - x) > r + TILE || Math.abs((t.tz + 0.5) * TILE - z) > r + TILE) continue;
       for (const [tx, , tz, sc, type] of t.trees) if (Math.abs(tx - x) < r && Math.abs(tz - z) < r) circles.push({ x: tx, z: tz, r: type === 0 ? 0.35 * sc : 0.28 * sc });
+      for (const [vx, , vz, rot, kind] of t.cars) {
+        if (Math.abs(vx - x) > r + 14 || Math.abs(vz - z) > r + 14) continue;
+        const c = Math.cos(rot), sn = -Math.sin(rot);
+        for (const [off, rad] of carCircles(kind)) {
+          const px = vx + c * off, pz = vz + sn * off;
+          if (Math.abs(px - x) < r && Math.abs(pz - z) < r) circles.push({ x: px, z: pz, r: rad });
+        }
+      }
     }
     return { rects, circles };
   }

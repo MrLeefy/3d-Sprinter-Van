@@ -12,7 +12,7 @@ export const ROOF = [[0.22, 0.22, 0.24], [0.3, 0.2, 0.14], [0.2, 0.32, 0.25], [0
 const STONE = lin([0.55, 0.52, 0.48]), WHITE = lin([0.92, 0.92, 0.9]), STEEL = lin([0.45, 0.47, 0.5]), DARK = lin([0.1, 0.1, 0.11]), RED = lin([0.62, 0.15, 0.12]);
 
 // kinds drawn by the shader
-export const K = { house: 0, shop: 1, office: 2, metal: 3, plain: 4, roof: 5, glass: 6, brick: 7, sign: 12, panel: 13 };
+export const K = { house: 0, shop: 1, office: 2, metal: 3, plain: 4, roof: 5, glass: 6, brick: 7, sign: 12, panel: 13, glow: 14 };
 
 class GB {
   constructor(ox, oz) {
@@ -335,14 +335,65 @@ export function buildLot(gb, lot, node, atlas) {
       break;
     }
     case 'canopy': {
-      const hh = lot.h;
-      gb.box(x0, x1, z0, z1, hh, hh + 0.9, lot.pal === 7 ? lin([0.78, 0.18, 0.14]) : WHITE, K.plain, seed, lin([0.8, 0.8, 0.82]));
-      for (const [px, pz] of [[x0 + 1, z0 + 1], [x1 - 1, z0 + 1], [x0 + 1, z1 - 1], [x1 - 1, z1 - 1]]) gb.box(px - 0.3, px + 0.3, pz - 0.3, pz + 0.3, y0, hh, WHITE, K.plain, seed, null);
-      gb.quad([x0 + 0.2, hh - 0.01, z1 - 0.2], [x1 - 0.2, hh - 0.01, z1 - 0.2], [x1 - 0.2, hh - 0.01, z0 + 0.2], [x0 + 0.2, hh - 0.01, z0 + 0.2], [0, -1, 0], [1, 1, 1], K.panel, seed);
+      const hh = lot.h, red = lot.pal === 7;
+      const fas = red ? lin([0.78, 0.18, 0.14]) : WHITE;
+      gb.box(x0, x1, z0, z1, hh, hh + 0.9, fas, K.plain, seed, lin([0.8, 0.8, 0.82]));
+      gb.box(x0 - 0.03, x1 + 0.03, z0 - 0.03, z1 + 0.03, hh + 0.38, hh + 0.52, WHITE, K.plain, seed, null);
       const pumps = lot.pumps || 4;
+      // columns at the corners and on the island ends so long canopies stay believable
+      const cols = [[x0 + 1, z0 + 1], [x1 - 1, z0 + 1], [x0 + 1, z1 - 1], [x1 - 1, z1 - 1]];
+      for (let i = 1; i < Math.round(w / 15); i++) cols.push([x0 + (w * i) / Math.round(w / 15), z]);
+      for (const [px, pz] of cols) gb.box(px - 0.3, px + 0.3, pz - 0.3, pz + 0.3, y0, hh, WHITE, K.plain, seed, null);
+      gb.quad([x0 + 0.2, hh - 0.01, z1 - 0.2], [x1 - 0.2, hh - 0.01, z1 - 0.2], [x1 - 0.2, hh - 0.01, z0 + 0.2], [x0 + 0.2, hh - 0.01, z0 + 0.2], [0, -1, 0], [1, 1, 1], K.panel, seed);
+      // price / brand boards on both long faces
+      const brand = lot.sign || node.name || 'FUEL';
+      const [u0, v0, u1, v1] = atlas.slot(`${String(brand).toUpperCase().slice(0, 22)}\nDIESEL · UNLEADED`, 2);
+      const bw = Math.min(w - 2, 9);
+      gb.signQuad([x0 + w / 2 - bw / 2, hh + 0.05, z1 + 0.05], [x0 + w / 2 + bw / 2, hh + 0.05, z1 + 0.05], [x0 + w / 2 + bw / 2, hh + 0.85, z1 + 0.05], [x0 + w / 2 - bw / 2, hh + 0.85, z1 + 0.05], [0, 0, 1], u0, v0, u1, v1, seed);
+      gb.signQuad([x0 + w / 2 + bw / 2, hh + 0.05, z0 - 0.05], [x0 + w / 2 - bw / 2, hh + 0.05, z0 - 0.05], [x0 + w / 2 - bw / 2, hh + 0.85, z0 - 0.05], [x0 + w / 2 + bw / 2, hh + 0.85, z0 - 0.05], [0, 0, -1], u0, v0, u1, v1, seed);
+      // pump islands with dispensers (red/white, glowing display facing each lane)
+      const iw = Math.min(4.2, (w / pumps) * 0.8);
       for (let i = 0; i < pumps; i++) {
         const px = x0 + (w * (i + 0.5)) / pumps;
-        gb.box(px - 0.4, px + 0.4, z - 0.35, z + 0.35, y0, y0 + 1.5, lin([0.8, 0.1, 0.1]), K.plain, seed, lin([0.2, 0.2, 0.2]));
+        gb.box(px - iw / 2, px + iw / 2, z - 0.8, z + 0.8, y0, y0 + 0.2, lin([0.62, 0.62, 0.6]), K.plain, seed, lin([0.62, 0.62, 0.6]));
+        gb.box(px - 0.32, px + 0.32, z - 0.28, z + 0.28, y0 + 0.2, y0 + 1.6, red ? lin([0.8, 0.1, 0.1]) : lin([0.9, 0.9, 0.9]), K.plain, seed, lin([0.2, 0.2, 0.2]));
+        for (const sd of [-1, 1]) gb.quad([sd > 0 ? px - 0.2 : px + 0.2, y0 + 1.1, z + sd * 0.285], [sd > 0 ? px + 0.2 : px - 0.2, y0 + 1.1, z + sd * 0.285], [sd > 0 ? px + 0.2 : px - 0.2, y0 + 1.45, z + sd * 0.285], [sd > 0 ? px - 0.2 : px + 0.2, y0 + 1.45, z + sd * 0.285], [0, 0, sd], lin([0.45, 0.95, 0.55]), K.glow, seed, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+      }
+      break;
+    }
+    case 'diner': {
+      const col = lin([[0.86, 0.84, 0.8], [0.8, 0.82, 0.84], [0.7, 0.2, 0.16]][lot.pal % 3]);
+      gb.box(x0, x1, z0, z1, y0, top, col, K.shop, seed, lin([0.35, 0.35, 0.37]));
+      const fz = face > 0 ? z1 : z0;
+      // stainless band, red stripe and a roof sign on posts
+      gb.box(x0 - 0.04, x1 + 0.04, face > 0 ? fz - 0.1 : fz - 0.05, face > 0 ? fz + 0.05 : fz + 0.1, y0 + 3.05, y0 + 3.4, lin([0.75, 0.77, 0.8]), K.metal, seed, null);
+      gb.box(x0 - 0.05, x1 + 0.05, face > 0 ? fz - 0.1 : fz - 0.05, face > 0 ? fz + 0.06 : fz + 0.1, y0 + 3.4, y0 + 3.7, lin([0.7, 0.1, 0.08]), K.plain, seed, null);
+      signOn(lot.sign || 'DINER', fz, x, y0 + 4.2, Math.min(w - 2, 8), 1.4, 0);
+      for (const px of [x - 3, x + 3]) gb.box(px - 0.08, px + 0.08, z - 0.08, z + 0.08, top, top + 0.8, STEEL, K.plain, seed, null);
+      const [u0, v0, u1, v1] = atlas.slot('EAT', 0);
+      for (const sd of [-1, 1]) gb.signQuad([x - 1.8 * sd, top + 0.8, z + sd * 0.1], [x + 1.8 * sd, top + 0.8, z + sd * 0.1], [x + 1.8 * sd, top + 2.5, z + sd * 0.1], [x - 1.8 * sd, top + 2.5, z + sd * 0.1], [0, 0, sd], u0, v0, u1, v1, seed);
+      break;
+    }
+    case 'depot': {
+      const wood = lin([0.42, 0.2, 0.14]);
+      gb.box(x0, x1, z0, z1, y0, top, wood, K.house, seed);
+      gb.gable(x0, x1, z0, z1, top, 1.9, 'x', ROOF[0], wood, K.house, seed, 0.9);
+      gb.box(x0 - 0.5, x1 + 0.5, face > 0 ? z1 : z0 - 3.5, face > 0 ? z1 + 3.5 : z0, y0, y0 + 0.35, lin([0.5, 0.45, 0.4]), K.plain, seed, lin([0.5, 0.45, 0.4])); // platform
+      signOn(lot.sign || 'DEPOT', face > 0 ? z1 : z0, x, y0 + 2.6, Math.min(w - 2, 7), 0.9, 4);
+      break;
+    }
+    case 'railcar': {
+      const yb = y0 + 0.95, kind = lot.car ?? 0;
+      gb.box(x0 + 1.2, x1 - 1.2, z - 0.8, z + 0.8, y0 + 0.4, yb, DARK, K.plain, seed, null);
+      for (const wx of [x0 + 2, x0 + 3.6, x1 - 3.6, x1 - 2]) gb.box(wx - 0.45, wx + 0.45, z - 1.1, z + 1.1, y0 + 0.1, y0 + 0.9, DARK, K.plain, seed, null);
+      if (kind === 1) {
+        const r = 1.5, c = z;
+        gb.prism('x', x0 + 0.3, x1 - 0.3, [[c - 0.8, yb], [c - r, yb + 0.7], [c - r, yb + 1.9], [c - 0.8, yb + 2.6], [c + 0.8, yb + 2.6], [c + r, yb + 1.9], [c + r, yb + 0.7], [c + 0.8, yb]], lin([0.08, 0.08, 0.09]), lin([0.08, 0.08, 0.09]), K.plain, seed);
+        gb.box(x - 0.5, x + 0.5, z - 0.4, z + 0.4, yb + 2.6, yb + 3.0, STEEL, K.metal, seed, STEEL);
+      } else if (kind === 2) {
+        gb.box(x0 + 0.1, x1 - 0.1, z - 1.5, z + 1.5, yb, yb + 2.6, lin([0.5, 0.5, 0.52]), K.metal, seed, lin([0.35, 0.35, 0.37]));
+      } else {
+        gb.box(x0, x1, z - 1.5, z + 1.5, yb, yb + 3.2, [lin([0.45, 0.16, 0.1]), lin([0.2, 0.35, 0.3]), lin([0.55, 0.45, 0.2]), lin([0.3, 0.3, 0.34])][lot.pal % 4], K.metal, seed, lin([0.3, 0.3, 0.32]));
       }
       break;
     }
@@ -418,6 +469,7 @@ export function makeBuildingMaterial(season, atlas) {
         float bwin = 0.0;
         float blit = 0.0;
         float brough = 0.85;
+        float bglow = 0.0;
         vec3 bwall = diffuseColor.rgb;
         vec3 bglass = vec3(0.012, 0.02, 0.03);
         if (bk == 12.0) {
@@ -428,6 +480,9 @@ export function makeBuildingMaterial(season, atlas) {
           diffuseColor.rgb = vec3(1.0);
           bwin = 1.0;
           blit = 1.0;
+        } else if (bk == 14.0) {
+          bglow = 1.0;
+          brough = 0.35;
         } else if (bk == 5.0) {
           float sh = 0.9 + 0.1 * sin(bp.y * 5.5) * 0.5 + 0.06 * (vn(bp * 1.7) - 0.5);
           diffuseColor.rgb *= sh;
@@ -474,10 +529,11 @@ export function makeBuildingMaterial(season, atlas) {
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = brough;')
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         totalEmissiveRadiance += vBLitCol * bwin * blit * uNight * 1.7;
-        if (bk == 12.0) totalEmissiveRadiance += diffuseColor.rgb * uNight * 0.7;`);
+        if (bk == 12.0) totalEmissiveRadiance += diffuseColor.rgb * uNight * 0.7;
+        totalEmissiveRadiance += diffuseColor.rgb * bglow * (0.55 + uNight * 2.2);`);
     // declare the lit colour next to the other locals
     sh.fragmentShader = sh.fragmentShader.replace('float bk = floor(vInfo.x + 0.5);', 'float bk = floor(vInfo.x + 0.5);\n        vec3 vBLitCol = vec3(1.0, 0.8, 0.5);');
   };
-  mat.customProgramCacheKey = () => 'townBuildings';
+  mat.customProgramCacheKey = () => 'townBuildings2';
   return mat;
 }

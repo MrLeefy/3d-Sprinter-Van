@@ -191,3 +191,22 @@ test('lanes and mixes: interstate has two lanes per direction, semis dominate th
   assert.equal(pickWeighted({ a: 1, b: 3 }, 0.9), 'b');
   assert.ok(SPAWN_MIX.interstate.semi > SPAWN_MIX.county.semi && !SPAWN_MIX.gravel.semi);
 });
+
+test('lane decision: aborting a pass returns as soon as the lane is free, passed gap or not', () => {
+  const c = { inner: true, passing: true, abort: true, v: 28, v0: 31, pSelf: car, target: tgtFree, passedGap: -3, idle: 0 };
+  assert.equal(laneDecision(c), 'return');
+  assert.equal(laneDecision({ ...c, target: { gapAhead: 6, vAhead: 20, gapBehind: 1e9, vBehind: 0 } }), 'none', 'no room to tuck in yet');
+});
+
+test('lane decision: held up in the inner lane, move right to let the slower traffic go (and pass on the right)', () => {
+  const c = { inner: true, passing: false, v: 22, v0: 31, pSelf: car, target: tgtFree, idle: 0, lead: { gap: 20, v: 20, len: 5 }, followTime: 3 };
+  assert.equal(laneDecision(c), 'return');
+});
+
+test('lane decision: straight check is asked for the whole maneuver distance', () => {
+  let asked = 0;
+  const c = { multi: false, inner: false, heavy: false, v: 22, v0: 28, lead: { gap: 25, v: 17, len: 5 }, followTime: 4, target: tgtFree, pSelf: car, len: 4.7, oncoming: [], idle: 0, straight: (d) => ((asked = d), d < 300) };
+  assert.equal(laneDecision(c), 'none');
+  assert.ok(asked > 200, `asked ${asked}`);
+  assert.equal(laneDecision({ ...c, heavy: true }), 'none', 'trucks stay put on two-lane roads behind a moving leader');
+});

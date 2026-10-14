@@ -181,25 +181,31 @@ export function oncomingClear(man, oncoming, margin = 45) {
  *  c.lead         { gap, v, len } or null; c.followTime seconds spent held up
  *  c.target       { gapAhead, vAhead, gapBehind, vBehind } in the lane we would move to
  *  c.pSelf, c.v, c.v0
- *  c.oncoming     [{ gap, v }] (two-lane roads); c.straight  sight line is straight and clear of towns
+ *  c.oncoming     [{ gap, v }] (two-lane roads); c.straight  true / false or (dist) => bool: sight line straight and clear
+ *  c.abort        a pass is being abandoned (return as soon as the lane is free, ignore the passed gap)
  *  c.passedGap    gap (m) between our rear bumper and the passed vehicle's front, or Infinity
  *  c.idle         seconds since we were last held up
  */
 export function laneDecision(c) {
   if (c.inner) {
+    // abort: something is coming at us and we are not clear of the passed vehicle — get back in line
+    if (c.abort) return mergeSafe({ pSelf: c.pSelf, v: c.v, ...c.target }) ? 'return' : 'none';
     // finished the pass? move back when the passed vehicle is far enough behind and the lane is free
     if (c.passing) {
       if (c.passedGap < Math.max(9, 0.8 * c.v)) return 'none';
-    } else if (c.idle < 6) return 'none';
+    } else if (c.idle < 6 && !(c.lead && c.followTime > 2.5)) return 'none';
     return mergeSafe({ pSelf: c.pSelf, v: c.v, ...c.target }) ? 'return' : 'none';
   }
   if (!c.lead) return 'none';
   const gain = c.heavy ? 4 : 1.8;
   if (!wantsToPass({ v0: c.v0, v: c.v, leadV: c.lead.v, leadGap: c.lead.gap, followTime: c.followTime, minGain: gain })) return 'none';
   if (c.multi) return mergeSafe({ pSelf: c.pSelf, v: c.v, ...c.target }) ? 'pass' : 'none';
+  if (c.heavy && c.lead.v > 3) return 'none'; // trucks do not pull out on two-lane roads unless the leader is crawling
   if (!c.straight) return 'none';
   const vPass = Math.min(c.v0 * 1.12, Math.max(c.lead.v + 7, c.v));
   const man = passManeuver({ vLead: c.lead.v, gap: c.lead.gap, lenLead: c.lead.len ?? 5, lenSelf: c.len ?? 5, vPass });
+  if (typeof c.straight === 'function' && !c.straight(man.dist + 60)) return 'none';
+  if (!mergeSafe({ pSelf: c.pSelf, v: c.v, ...c.target })) return 'none';
   return oncomingClear(man, c.oncoming || []) ? 'pass' : 'none';
 }
 

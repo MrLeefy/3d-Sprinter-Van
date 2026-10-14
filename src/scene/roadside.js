@@ -7,51 +7,12 @@ import { GB, K, geometryFromBuilder } from './buildings.js';
 import { poisOf, POI_TYPES } from '../world/poi.js';
 import { hash2, hashStr } from '../world/noise.js';
 import { SLOGANS } from '../world/names.js';
+import { limitMph, mileMarkers, mileAt, advanceSigns, wildlifeSigns, guardSpans, exitLabel } from '../world/highway.js';
+import { lin, WOOD, DARK, STEEL, STONE, obox, wire, board, makeCtx, guardrail, delineators, gantry, overpass, restArea, weighStation, runawayRamp, farmstead } from './roadprops.js';
 
 const BLOCK = 240;
 const POLE = 55;
-const lin = (c) => c.map((v) => Math.pow(v, 2.2));
-const WOOD = lin([0.33, 0.24, 0.16]), DARK = lin([0.08, 0.08, 0.09]), STEEL = lin([0.5, 0.52, 0.55]), STONE = lin([0.5, 0.48, 0.44]), WIRE = lin([0.05, 0.05, 0.06]);
-const LIMIT_MPH = { interstate: 80, highway: 65, county: 55, gravel: 35, dirt: 20 };
 const mi = (m) => (m < 1609 * 9.5 ? `${Math.max(1, Math.round(m / 1609))}` : `${Math.round(m / 1609)}`);
-
-/** Oriented box: local u runs along the facing's right vector t, d along its normal n. */
-function obox(gb, cx, cz, y0, y1, hw, hd, yaw, col, kind = K.plain, seed = 1, topCol = null) {
-  const nx = Math.sin(yaw), nz = Math.cos(yaw), tx = Math.cos(yaw), tz = -Math.sin(yaw);
-  const P = (u, d, y) => [cx + tx * u + nx * d, y, cz + tz * u + nz * d];
-  const c = [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]];
-  const normals = [[-nx, 0, -nz], [tx, 0, tz], [nx, 0, nz], [-tx, 0, -tz]];
-  for (let i = 0; i < 4; i++) {
-    const A = c[i], B = c[(i + 1) % 4];
-    const len = Math.hypot(B[0] - A[0], B[1] - A[1]);
-    gb.quad(P(A[0], A[1], y0), P(B[0], B[1], y0), P(B[0], B[1], y1), P(A[0], A[1], y1), normals[i], col, kind, seed, [[0, 0], [len, 0], [len, y1 - y0], [0, y1 - y0]]);
-  }
-  if (topCol) gb.quad(P(c[0][0], c[0][1], y1), P(c[1][0], c[1][1], y1), P(c[2][0], c[2][1], y1), P(c[3][0], c[3][1], y1), [0, 1, 0], topCol, K.roof, seed);
-}
-
-/** A thin ribbon between two 3D points (a flat and an upright ribbon, both faces) for wires and strands. */
-function wire(gb, a, b, w = 0.05, col = WIRE) {
-  const dx = b[0] - a[0], dz = b[2] - a[2], l = Math.hypot(dx, dz) || 1;
-  const su = [dz / l, 0, -dx / l]; // horizontal unit vector across the span
-  const hx = su[0] * (w / 2), hz = su[2] * (w / 2);
-  const flat = (n) => gb.quad([a[0] - hx, a[1], a[2] - hz], [a[0] + hx, a[1], a[2] + hz], [b[0] + hx, b[1], b[2] + hz], [b[0] - hx, b[1], b[2] - hz], n, col, K.plain, 3);
-  flat([0, 1, 0]);
-  flat([0, -1, 0]);
-  const up = (n) => gb.quad([a[0], a[1] - w / 2, a[2]], [b[0], b[1] - w / 2, b[2]], [b[0], b[1] + w / 2, b[2]], [a[0], a[1] + w / 2, a[2]], n, col, K.plain, 3);
-  up(su);
-  up([-su[0], 0, -su[2]]);
-}
-
-/** Sign board on two posts; faces direction `yaw` (its normal). */
-function board(gb, atlas, x, z, y, yaw, w, h, clear, text, style, seed = 1) {
-  const nx = Math.sin(yaw), nz = Math.cos(yaw), tx = Math.cos(yaw), tz = -Math.sin(yaw);
-  const P = (u, hh, d = 0) => [x + tx * u + nx * d, y + hh, z + tz * u + nz * d];
-  for (const u of [-w / 2 + 0.35, w / 2 - 0.35]) obox(gb, x + tx * u, z + tz * u, y, y + clear + h, 0.07, 0.07, yaw, STEEL, K.plain, seed);
-  obox(gb, x, z, y + clear, y + clear + h, w / 2, 0.04, yaw, lin([0.2, 0.2, 0.22]), K.plain, seed);
-  const [u0, v0, u1, v1] = atlas.slot(text, style);
-  const d = 0.06;
-  gb.signQuad(P(-w / 2, clear, d), P(w / 2, clear, d), P(w / 2, clear + h, d), P(-w / 2, clear + h, d), [nx, 0, nz], u0, v0, u1, v1, seed);
-}
 
 // ── POI props ────────────────────────────────────────────────────────────────
 function poiProp(gb, p, y, yaw) {
@@ -180,7 +141,10 @@ export class Roadside {
     return edgeAt(e, s);
   }
 
-  /** Signs for an edge, cached: [{ s, side, text, style, w, h, face }]. face = +1 toward traffic moving +s. */
+  /**
+   * Signs for an edge, cached: [{ s, side, text, style, w, h, clear, face, ... }]. face = +1 toward traffic
+   * moving +s. `gantry` signs span the interstate overhead; `kind` marks advance signs for lots.
+   */
   signsOf(e) {
     if (e._signs) return e._signs;
     const out = [];
@@ -190,7 +154,7 @@ export class Roadside {
     const dest = (node, s, side, face) => {
       if (!node.name || node.kind === 'junction') return;
       const dist = face > 0 ? e.len - s : s;
-      out.push({ s, side, text: `${node.name}\n${mi(dist)} mi`, style: 1, w: big ? 5.4 : 3.8, h: big ? 2.2 : 1.6, clear: big ? 2.4 : 1.6, face });
+      out.push({ s, side, text: `${node.name}\n${mi(dist)} mi`, style: 1, w: big ? 5.4 : 3.8, h: big ? 2.2 : 1.6, clear: big ? 2.4 : 1.6, face, gantry: cls === 'interstate' });
     };
     if (e.len > 2600) {
       dest(e.b, e.len - 3200, 1, 1);
@@ -200,13 +164,30 @@ export class Roadside {
       dest(e.b, e.len - 1000, 1, 1);
       dest(e.a, 1000, -1, -1);
     }
-    const lim = LIMIT_MPH[cls];
+    // speed limits in mph, from the posted km/h table, repeated every ~4 km after each junction
+    const lim = limitMph(cls);
     if (lim) {
-      out.push({ s: 110, side: 1, text: `SPEED LIMIT\n${lim}`, style: 5, w: 1.5, h: 1.9, clear: 1.5, face: 1, narrow: true });
-      out.push({ s: e.len - 110, side: -1, text: `SPEED LIMIT\n${lim}`, style: 5, w: 1.5, h: 1.9, clear: 1.5, face: -1, narrow: true });
+      const text = `SPEED LIMIT\n${lim}`;
+      for (let q = 0, s = 110; s < e.len - 300; q++, s = 110 + q * 4000) out.push({ s, side: 1, text, style: 5, w: 1.5, h: 1.9, clear: 1.5, face: 1, narrow: true });
+      for (let q = 0, s = e.len - 110; s > 300; q++, s = e.len - 110 - q * 4000) out.push({ s, side: -1, text, style: 5, w: 1.5, h: 1.9, clear: 1.5, face: -1, narrow: true });
     }
-    for (let m = 1; m * 1609.34 < e.len - 100; m++) out.push({ s: m * 1609.34, side: 1, text: `${m + Math.floor(h(9) * 40)}`, style: 1, w: 0.7, h: 0.9, clear: 0.7, face: 1, narrow: true });
+    // mile posts count whole miles of the road's axis, so they agree across neighbouring edges
+    if (cls !== 'dirt') for (const m of mileMarkers(e)) out.push({ s: m.s, side: 1, text: `MILE\n${m.mile}`, style: 1, w: 1.1, h: 0.6, clear: 0.8, face: 1, narrow: true });
+    for (const w of wildlifeSigns(e)) out.push({ s: w.s, side: w.side, face: w.face, text: `${w.kind}\nCROSSING`, style: 3, w: 1.8, h: 0.9, clear: 1.4, narrow: true });
     if (big) {
+      for (const sg of advanceSigns(e, { lots: e.lots })) {
+        const style = sg.kind === 'rest' || sg.kind === 'weigh' ? 2 : 3;
+        out.push({ s: sg.s, side: sg.side, face: sg.face, text: sg.text, style, w: 4.4, h: 1.6, clear: 1.8 });
+      }
+      for (const ov of e.overpasses) {
+        const p = edgeAt(e, ov.s);
+        const n = mileAt(e.dir, p.x, p.z), label = exitLabel(e, ov);
+        for (const face of [1, -1]) {
+          const sFar = ov.s - face * 820, sNear = ov.s - face * 300;
+          out.push({ s: sFar, side: face, face, text: `EXIT ${n}  1/2 MILE\n${label}`, style: 1, w: 9.6, h: 2.4, gantry: cls === 'interstate', ...(cls === 'interstate' ? {} : { w: 5, h: 1.8, clear: 2.2 }) });
+          out.push({ s: sNear, side: face, face, text: `EXIT ${n}\n${label}`, style: 1, w: 4.6, h: 1.7, clear: 2 });
+        }
+      }
       const nb = Math.floor((e.len / 3400) * (0.5 + h(11)));
       for (let q = 0; q < nb; q++) {
         const s = e.len * (0.15 + 0.7 * ((q + 0.2 + 0.6 * h(12 + q)) / Math.max(1, nb)));
@@ -292,19 +273,23 @@ export class Roadside {
     const gb = new GB(ox, oz);
     const atlas = this.towns.atlas;
     const circles = [];
-    const w2 = e.P.width / 2;
+    const ctx = makeCtx({ gb, atlas, W, e, circles, at: edgeAt });
+    const hw = ctx.hw;
+    const big = e.cls === 'interstate' || e.cls === 'highway';
     const f = this.flagsOf(e);
+    const hid = hashStr(e.id);
     const place = (s, side, off) => {
       const p = this.at(e, s);
-      return { x: p.x + -p.tz * side * (w2 + off), z: p.z + p.tx * side * (w2 + off), p };
+      return { x: p.x + -p.tz * side * (hw + off), z: p.z + p.tx * side * (hw + off), p };
     };
     const lon = (p) => Math.atan2(-p.tz, p.tx); // yaw whose right vector is the road tangent
+    const nearOverpass = (s, m) => e.overpasses.some((ov) => Math.abs(ov.s - s) < m);
     // power line: poles every 55 m on one side, three sagging wires
     if (f.power) {
       const i0 = Math.ceil(s0 / POLE), i1 = Math.ceil(s1 / POLE) - 1;
       for (let i = i0; i <= i1; i++) {
         const s = i * POLE;
-        if (s < 40 || s > e.len - 40) continue;
+        if (s < 40 || s > e.len - 40 || nearOverpass(s, 12) || ctx.lotW(f.power, s) > 3) continue;
         const A = place(s, f.power, 9), B = place(Math.min(e.len - 20, s + POLE), f.power, 9);
         if (W.settlementAt(A.x, A.z, 30)) continue;
         const ya = W.heightAt(A.x, A.z), yb = W.heightAt(B.x, B.z);
@@ -327,15 +312,15 @@ export class Roadside {
         }
       }
     }
-    // ranch fence: posts every 6 m with three strands
-    if (f.fence) {
+    // fences: posts every 6 m with three strands, wherever `on(s)` says so
+    const fence = (side, off, on, salt) => {
       let prevTop = null;
       for (let s = Math.ceil(s0 / 6) * 6; s < s1; s += 6) {
-        if (s < 30 || s > e.len - 30) {
+        if (s < 30 || s > e.len - 30 || !on(s) || nearOverpass(s, 7) || ctx.lotW(side, s) > off - 1.5 || hash2(Math.floor(s / 6), hid + side, salt) < 0.012) {
           prevTop = null;
           continue;
         }
-        const A = place(s, f.fence, 7);
+        const A = place(s, side, off);
         if (W.settlementAt(A.x, A.z, 30)) {
           prevTop = null;
           continue;
@@ -345,13 +330,79 @@ export class Roadside {
         if (prevTop) for (const hh of [0.45, 0.85, 1.2]) wire(gb, [prevTop.x, prevTop.y + hh, prevTop.z], [A.x, ya + hh, A.z], 0.03);
         prevTop = { x: A.x, y: ya, z: A.z };
       }
+    };
+    if (f.fence) fence(f.fence, 7, () => true, 61);
+    // field fences: wherever the land beside the road is crop or pasture
+    const bio = {};
+    if (e.cls !== 'dirt') {
+      for (const side of [1, -1]) {
+        if (side === f.fence) continue;
+        const off = e.cls === 'interstate' ? 11 : 6, memo = new Map();
+        fence(side, off, (s) => {
+          const q = Math.floor(s / 24);
+          let v = memo.get(q);
+          if (v === undefined) {
+            const A = place(q * 24 + 12, side, off + 22);
+            v = !W.settlementAt(A.x, A.z, 40) && W.biome(A.x, A.z, e.hs[Math.min(e.n - 1, Math.round(((q * 24 + 12) / e.len) * (e.n - 1)))], bio).field > 0.45;
+            memo.set(q, v);
+          }
+          return v;
+        }, 62);
+      }
+    }
+    // guardrails along embankments, delineator posts, interchange overpasses, lots (interstate / highway / county)
+    const railSpans = { 1: [], '-1': [] };
+    if (e.cls !== 'gravel' && e.cls !== 'dirt') {
+      const thr = big ? 1.3 : 2.2, STEP = 8;
+      const sa = Math.max(40, s0 - STEP), sb = Math.min(e.len - 40, s1 + STEP);
+      const n = Math.max(0, Math.floor((sb - sa) / STEP) + 1);
+      for (const side of [1, -1]) {
+        const need = new Array(n), blocked = new Array(n);
+        for (let i = 0; i < n; i++) {
+          const s = sa + i * STEP, A = place(s, side, 4);
+          need[i] = ctx.roadY(s) - W.heightAt(A.x, A.z) > thr;
+          blocked[i] = ctx.lotW(side, s) > 0.2 || nearOverpass(s, 26) || !!W.settlementAt(A.x, A.z, 30);
+        }
+        for (const [i0, i1] of guardSpans(need, blocked, 3, 2)) {
+          const a = Math.max(s0, sa + i0 * STEP - 4), z1 = Math.min(s1, sa + i1 * STEP + 4);
+          if (z1 - a < 8) continue;
+          guardrail(ctx, side, a, z1);
+          railSpans[side].push([a, z1]);
+        }
+      }
+    }
+    if (big) delineators(ctx, s0, s1, railSpans);
+    for (const ov of e.overpasses) if (ov.s >= s0 && ov.s < s1) overpass(ctx, ov);
+    for (const lot of e.lots) {
+      const sc = (lot.s0 + lot.s1) / 2;
+      if (sc < s0 || sc >= s1) continue;
+      if (lot.kind === 'rest') restArea(ctx, lot);
+      else if (lot.kind === 'weigh') weighStation(ctx, lot);
+      else if (lot.kind === 'runaway') runawayRamp(ctx, lot);
+    }
+    // farmsteads: barn, silos, farmhouse, windmill and a paddock herd on cropland beside quieter roads
+    if (e.cls !== 'interstate' && e.cls !== 'dirt') {
+      const hh = (k) => hash2(hid, b * 31 + k, 303);
+      if (hh(0) < (e.cls === 'highway' ? 0.14 : 0.24) && s1 - s0 > 150) {
+        const side = hh(1) < 0.5 ? 1 : -1, s = s0 + 40 + hh(2) * (s1 - s0 - 80), dist = hw + 48 + hh(3) * 30;
+        const A = place(s, side, 48 + hh(3) * 30 - 0);
+        const okLot = ctx.lotW(side, s) < 1;
+        if (okLot && s > 120 && s < e.len - 120 && !W.settlementAt(A.x, A.z, 60) && !nearOverpass(s, 120) && !W.lakesNear(A.x, A.z).some((l) => W.lakeRn(l, A.x, A.z) < 1.4)) {
+          const roadY = ctx.roadY(s), g = W.heightAt(A.x, A.z);
+          if (Math.abs(g - roadY) < 9 && W.biome(A.x, A.z, g, bio).field > 0.4) farmstead(ctx, s, side, dist, (k) => hash2(hid, b * 31 + k + 400, 304));
+        }
+      }
     }
     // signs and billboards
     for (const sg of this.signsOf(e)) {
       if (sg.s < s0 || sg.s >= s1) continue;
+      if (sg.gantry) {
+        if (!W.settlementAt(this.at(e, sg.s).x, this.at(e, sg.s).z, 20) && !nearOverpass(sg.s, 40)) gantry(ctx, sg.s, sg.face, sg.text, sg.style);
+        continue;
+      }
       const off = sg.off ?? (sg.narrow ? 3.2 : 5);
       const A = place(sg.s, sg.side, off);
-      if (W.settlementAt(A.x, A.z, 20)) continue;
+      if (W.settlementAt(A.x, A.z, 20) || nearOverpass(sg.s, 16) || ctx.lotW(sg.side, sg.s) > off - 2) continue;
       const nx = sg.face > 0 ? -A.p.tx : A.p.tx, nz = sg.face > 0 ? -A.p.tz : A.p.tz;
       const yaw = Math.atan2(nx, nz);
       const y = W.heightAt(A.x, A.z);

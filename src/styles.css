@@ -285,6 +285,11 @@ h2.title { margin: 0; font-family: var(--f-display); font-weight: 600; font-size
 #app.driving .panel, #app.driving .rail, #app.driving .legendbox, #app.driving .mobile-toggles, #app.driving .tourcard, #app.driving .walkhud, #app.driving .caption, #app.driving .irscale { display: none !important; }
 .drivehud { position: absolute; inset: calc(var(--top) + env(safe-area-inset-top, 0px)) 0 0 0; z-index: 12; pointer-events: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .drivehud > * { pointer-events: auto; }
+.dh-menubtn { display: none; position: absolute; top: 8px; right: 8px; width: 44px; height: 54px; place-items: center; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); font-size: 22px; cursor: pointer; box-shadow: var(--shadow); backdrop-filter: blur(10px); z-index: 6; }
+.dh-only-menu { display: none; }
+.dh-fuelchip { display: none; align-items: center; gap: 3px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.dh-fuelchip b { color: var(--fg); font-family: var(--f-data); font-weight: 600; }
+.dh-fuelchip.low b { color: var(--crit); }
 .dh-map { position: absolute; left: 14px; top: 12px; width: 132px; height: 132px; border-radius: 50%; box-shadow: var(--shadow); border: 2px solid var(--line); cursor: pointer; }
 .dh-slot { position: absolute; left: 14px; top: 156px; width: min(272px, calc(100% - 28px)); display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
 .dh-slot > * { pointer-events: auto; }
@@ -359,51 +364,59 @@ h2.title { margin: 0; font-family: var(--f-display); font-weight: 600; font-size
 .dh-keys td:first-child { width: 42%; white-space: nowrap; }
 .dh-keys kbd { font-family: var(--f-data); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 5px; background: var(--raise); }
 @media (max-width: 900px) {
-  :root { --drive-pad: 112px; }
   .topbar { grid-template-columns: minmax(0, 1fr) auto auto auto; grid-template-areas: 'brand clock drive tour' 'scn scn scn scn'; }
   .drivebtn { grid-area: drive; height: 30px; padding: 0 10px; }
-  .dh-map { width: 96px; height: 96px; left: 10px; top: 8px; }
-  .dh-slot { left: 116px; top: 52px; width: min(330px, calc(100% - 250px)); }
-  .dh-svc { max-height: 150px; overflow-y: auto; pointer-events: auto; }
-  .sv-card { padding: 6px 10px; }
+  .dh-btn { padding: 6px 9px; font-size: 12px; }
+  .dh-sheet { right: 10px; left: 10px; width: auto; top: 50px; max-height: calc(100% - 66px); }
+}
+/* Phones (portrait or landscape): the road stays clear. The top bar goes away, the buttons live in a
+   drop-down menu and only a slim speed strip stays at the top. */
+@media (max-width: 560px), (max-height: 460px) {
+  #app.driving .topbar { display: none; }
+  #app.driving { --top: 0px; }
+  .dh-menubtn { display: grid; }
+  .dh-map { width: 70px; height: 70px; left: 8px; top: 8px; border-width: 1px; }
+  .dh-cluster { top: 8px; bottom: auto; left: 86px; right: 58px; transform: none; width: auto; max-width: 380px; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 6px 10px; min-height: 54px; border-radius: 12px; }
+  .dh-speed b { font-size: 34px; min-width: 2ch; }
+  .dh-unit { font-size: 10px; padding: 0; }
+  .dh-limit { width: 36px; }
+  .dh-limit b { font-size: 19px; }
+  .dh-gear { width: 30px; height: 30px; font-size: 17px; }
+  .dh-fuelchip { display: inline-flex; }
+  .dh-badges { margin-left: auto; flex-wrap: nowrap; }
+  .dh-badges button { padding: 3px 7px; font-size: 10.5px; }
+  .dh-badges button:not([aria-pressed='true']) { display: none; }
+  .dh-badges #dhAssist { display: none; }
+  .dh-meters, .dh-info { display: none; }
+  .dh-top { display: none; }
+  .drivehud.menu .dh-top { display: flex; flex-direction: column; align-items: stretch; position: absolute; top: 70px; right: 8px; left: auto; width: min(230px, 72vw); max-width: none; padding: 8px; gap: 6px; background: var(--panel-solid); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); z-index: 5; }
+  .drivehud.menu .dh-top .dh-btn { text-align: left; padding: 9px 12px; font-size: 13.5px; }
+  .drivehud.menu .dh-only-menu { display: block; }
+  .dh-wallet { align-self: stretch; text-align: center; padding: 7px; }
+  .dh-slot { left: 8px; right: 8px; top: 70px; width: auto; }
+  .dh-slot .dh-svc { flex-direction: row; overflow-x: auto; overflow-y: hidden; max-height: none; gap: 8px; scroll-snap-type: x mandatory; pointer-events: auto; }
+  .sv-card { min-width: 78%; scroll-snap-align: start; padding: 6px 10px; }
   .sv-b p { margin: 2px 0 4px; }
   .dh-gps { padding: 5px 8px; }
   .gp-ic { width: 32px; height: 32px; font-size: 20px; }
-  .dh-top { right: 10px; top: 8px; max-width: calc(100% - 118px); }
-  .dh-btn { padding: 6px 9px; font-size: 12px; }
-  .dh-status { top: 110px; max-width: calc(100% - 24px); font-size: 12px; }
-  .dh-cluster { width: auto; min-width: 0; left: calc(var(--drive-pad) + 22px); right: calc(var(--drive-pad) + 100px); transform: none; grid-template-columns: auto auto auto; grid-template-areas: 'speed limit gear' 'badges badges badges' 'meters meters meters'; padding: 8px 10px; gap: 4px 8px; }
-  .dh-speed b { font-size: 34px; }
-  .dh-gear { width: 30px; height: 30px; font-size: 17px; }
-  .dh-limit { width: 38px; }
-  .dh-limit b { font-size: 20px; }
-  .dh-badges { justify-content: flex-start; }
-  .dh-badges button { padding: 3px 7px; font-size: 10.5px; }
-  .dh-badges #dhAssist { display: none; }
-  .dh-m { grid-template-columns: 1fr; gap: 2px; }
-  .dh-m span, .dh-m em { display: none; }
-  .dh-meters { gap: 3px; padding-top: 5px; }
-  .dh-info { display: none; }
+  .dh-status { top: 70px; max-width: calc(100% - 24px); font-size: 12px; }
+  .dh-hint { display: none; }
   .dh-wheel { width: 84px; height: 84px; border-width: 7px; }
-  .dh-steer { padding-left: 12px; }
+  .dh-steer { padding-left: 12px; height: 46%; }
   .dh-pedals { right: 10px; gap: 6px; }
   .dh-gearbtn { width: 46px; height: 46px; }
   .dh-gearbtn b { font-size: 21px; }
   #dhBrake { width: 66px; height: 74px; font-size: 13px; }
   #dhGas { width: 66px; height: 120px; font-size: 14px; }
   .dh-aux { right: 10px; bottom: calc(138px + env(safe-area-inset-bottom, 0px)); flex-direction: row; }
-  .dh-aux button { width: 44px; height: 44px; font-size: 17px; }
-  .dh-sheet { right: 10px; left: 10px; width: auto; top: 50px; max-height: calc(100% - 66px); }
+  .dh-aux button { width: 42px; height: 42px; font-size: 16px; }
+  .dh-aux button small { display: none; }
+  .dh-sheet { top: 8px; max-height: calc(100% - 16px); }
 }
-@media (max-width: 560px) {
-  .dh-cluster { top: 108px; bottom: auto; left: 10px; right: 10px; grid-template-columns: auto auto auto 1fr; grid-template-areas: 'speed limit gear badges' 'meters meters meters meters'; }
-  .dh-badges { justify-content: flex-end; }
-  .dh-m { grid-template-columns: 1fr; }
-  .dh-slot { left: 10px; top: 214px; width: calc(100% - 150px); }
-  .sv-card:nth-child(n+3) { display: none; }
-  .dh-status { top: 214px; }
-  .dh-top { max-width: calc(100% - 116px); }
-  .dh-steer { height: 44%; }
+@media (max-height: 460px) and (min-width: 561px) {
+  .dh-slot { left: 86px; right: 66px; top: 68px; }
+  .dh-aux { bottom: 12px; right: 190px; flex-direction: row; }
+  .dh-steer { height: 56%; }
 }
 
 /* wallet, services, passport */

@@ -4,6 +4,7 @@
 // `ui.modules` and get a tick() each frame while driving.
 import { ASSISTS } from '../scene/drive.js';
 import { SEASON_KEYS, SEASONS } from '../scene/season.js';
+import { SCENARIOS } from '../data/scenarios.js';
 import { drawWorldMap } from './mapview.js';
 import { MapScreen } from './mapscreen.js';
 import { Services } from './services.js';
@@ -62,7 +63,11 @@ export class DriveUI {
     this.root.innerHTML = `
     <canvas class="dh-map" id="dhMap" width="264" height="264" role="button" tabindex="0" aria-label="Map around the van. Tap for the full map."></canvas>
     <div class="dh-slot" id="dhSlot"></div>
+    <button class="dh-menubtn" id="dhMenu" aria-label="Menu" aria-expanded="false">☰</button>
     <div class="dh-top">
+      <button class="dh-btn dh-only-menu" id="dhCruiseM">Cruise control</button>
+      <button class="dh-btn dh-only-menu" id="dhLimiterM">Speed limiter</button>
+      <button class="dh-btn dh-only-menu" id="dhAssistM">Driving assist</button>
       <button class="dh-btn" id="dhCam" title="C">Camera · Chase</button>
       <button class="dh-btn" id="dhLights" title="L">Lights · auto</button>
       <button class="dh-btn" id="dhMapBtn" title="M">Map</button>
@@ -74,6 +79,7 @@ export class DriveUI {
       <div class="dh-speed"><b id="dhSpeed">0</b><button id="dhUnit" class="dh-unit" aria-label="Switch units">mph</button></div>
       <div class="dh-limit" id="dhLimit" hidden aria-label="Posted speed limit"><i>SPEED<br>LIMIT</i><b id="dhLimitV">65</b></div>
       <div class="dh-gear" id="dhGear">P</div>
+      <span class="dh-fuelchip" id="dhFuelChip" title="Fuel">⛽ <b>75</b>%</span>
       <div class="dh-badges">
         <button id="dhCruise" title="V" aria-pressed="false">Cruise</button>
         <button id="dhLimiter" title="B" aria-pressed="false">Limiter</button>
@@ -105,6 +111,10 @@ export class DriveUI {
       <div class="dh-row"><label>Steering sensitivity <em id="sSensV"></em></label><input type="range" id="sSens" min="0.6" max="1.6" step="0.05"></div>
       <div class="dh-row"><label>Camera shake <em id="sShakeV"></em></label><input type="range" id="sShake" min="0" max="1.5" step="0.1"></div>
       <div class="dh-row"><label>Units</label><div class="dh-seg" id="sUnits"><button data-v="mph">mph</button><button data-v="kmh">km/h</button></div></div>
+      <div class="dh-row"><label>Time of day <em id="sHourV"></em></label><input type="range" id="sHour" min="0" max="23.75" step="0.25"></div>
+      <div class="dh-row"><label>Weather scenario</label>
+        <div class="dh-seg" id="sScn">${SCENARIOS.map((c) => `<button data-v="${c.id}">${c.icon} ${c.short}</button>`).join('')}</div>
+        <p class="dh-note">The scenario sets the weather and restarts the camper's simulation.</p></div>
       <div class="dh-row"><label>Scenery season</label>
         <div class="dh-seg five" id="sSeason"><button data-v="auto">Auto</button>${SEASON_KEYS.map((k) => `<button data-v="${k}">${SEASONS[k].label}</button>`).join('')}</div>
         <p class="dh-note">The land is identical in every season — only its dressing changes. Auto follows the scenario. Temperatures and weather in the simulation still follow the scenario.</p></div>
@@ -143,16 +153,32 @@ export class DriveUI {
     $('#dhMap').addEventListener('click', () => this.openMap());
     $('#dhMap').addEventListener('keydown', (e) => e.key === 'Enter' && this.openMap());
     $('#dhUnit').addEventListener('click', () => this.set({ units: this.s.units === 'mph' ? 'kmh' : 'mph' }));
-    $('#dhCruise').addEventListener('click', () => {
+    const cruise = () => {
       const on = D.toggleCruise();
       if (!on && D.v < 2.5) A.toast('Cruise control needs a little speed first.');
-    });
-    $('#dhLimiter').addEventListener('click', () => D.toggleLimiter());
-    $('#dhAssist').addEventListener('click', () => {
+      this.menu(false);
+    };
+    const limiter = () => {
+      D.toggleLimiter();
+      this.menu(false);
+    };
+    const assist = () => {
       const keys = Object.keys(ASSISTS);
       this.set({ assist: keys[(keys.indexOf(this.s.assist) + 1) % keys.length] });
       A.toast(`${ASSISTS[this.s.assist].label} driving. ${ASSIST_TEXT[this.s.assist]}`);
+    };
+    $('#dhCruise').addEventListener('click', cruise);
+    $('#dhCruiseM').addEventListener('click', cruise);
+    $('#dhLimiter').addEventListener('click', limiter);
+    $('#dhLimiterM').addEventListener('click', limiter);
+    $('#dhAssist').addEventListener('click', assist);
+    $('#dhAssistM').addEventListener('click', assist);
+    $('#dhMenu').addEventListener('click', () => this.menu());
+    // choosing anything from the phone menu closes it again
+    $('.dh-top').addEventListener('click', (e) => {
+      if (e.target.closest('button') && !e.target.closest('#dhCruiseM, #dhLimiterM, #dhAssistM')) this.menu(false);
     });
+    $('#sHour').addEventListener('input', (e) => A.setHour(parseFloat(e.target.value)));
     $('#dhReset').addEventListener('click', () => D.resetToRoad());
     $('#dhHorn').addEventListener('pointerdown', () => D.honk());
     $('#dhGearBtn').addEventListener('click', () => {
@@ -206,6 +232,7 @@ export class DriveUI {
     seg('#sAssist', (v) => this.set({ assist: v }));
     seg('#sUnits', (v) => this.set({ units: v }));
     seg('#sSeason', (v) => this.set({ season: v }));
+    seg('#sScn', (v) => A.setScenario(v));
     seg('#sQual', (v) => A.setQuality(v, true));
     $('#sSens').addEventListener('input', (e) => this.set({ steerSens: parseFloat(e.target.value) }));
     $('#sShake').addEventListener('input', (e) => this.set({ camShake: parseFloat(e.target.value) }));
@@ -298,6 +325,13 @@ export class DriveUI {
     void initial;
   }
 
+  /** Phone layouts keep the road clear: every button lives in a drop-down menu. */
+  menu(open = !this.root.classList.contains('menu')) {
+    this.root.classList.toggle('menu', open);
+    this.$('#dhMenu').setAttribute('aria-expanded', String(open));
+    this.$('#dhMenu').textContent = open ? '×' : '☰';
+  }
+
   sheet(sel) {
     for (const id of ['#dhSheet', '#dhHelp']) this.$(id).hidden = id !== sel;
     if (sel && this.passport) this.passport.sheet.hidden = true;
@@ -326,6 +360,7 @@ export class DriveUI {
   // ── Lifecycle ──────────────────────────────────────────────────────────────
   show() {
     this.root.hidden = false;
+    this.menu(false);
     this.sheet(null);
     this.$('#dhCam').textContent = `Camera · ${this.D.camLabel()}`;
     this.$('#dhLights').textContent = `Lights · ${this.D.lights}`;
@@ -385,6 +420,17 @@ export class DriveUI {
       const fuelPct = (s && A.simState.fuelL / A.fuelCap) || 0;
       this.$('#dhFuel').style.width = `${Math.round(Math.min(1, fuelPct) * 100)}%`;
       this.$('#dhFuelT').textContent = `${A.simState.fuelL.toFixed(0)} L`;
+      const fc = this.$('#dhFuelChip');
+      fc.firstElementChild.textContent = String(Math.round(Math.min(1, fuelPct) * 100));
+      fc.classList.toggle('low', fuelPct < 0.15);
+      this.$('#dhCruiseM').setAttribute('aria-pressed', String(D.cruise.on));
+      this.$('#dhLimiterM').setAttribute('aria-pressed', String(D.limiter));
+      if (!this.$('#dhSheet').hidden) {
+        const h = A.hour();
+        this.$('#sHour').value = String(h);
+        this.$('#sHourV').textContent = `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.floor((h % 1) * 60)).padStart(2, '0')}`;
+        this.root.querySelectorAll('#sScn button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === A.scnId)));
+      }
       this.$('#dhBat').style.width = `${Math.round((s?.soc ?? 0) * 100)}%`;
       this.$('#dhBatT').textContent = `${Math.round((s?.soc ?? 0) * 100)} %${s?.altW > 0 ? ` · +${Math.round(s.altW)} W` : ''}`;
       this.$('#dhSurface').textContent = D.surface.label;

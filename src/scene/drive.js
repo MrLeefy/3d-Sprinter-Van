@@ -694,11 +694,13 @@ export class Driver {
     this.camLook += (this.delta * Math.min(1, Math.abs(this.v) / 10) * 3.5 - this.camLook) * (1 - Math.exp(-dt * 3));
     const gh = (lx, lz) => this.world.terrain.heightAt(this.x + lx * Math.cos(this.yaw) + lz * Math.sin(this.yaw), this.z - lx * Math.sin(this.yaw) + lz * Math.cos(this.yaw)) - (this.groundH ?? 0);
     if (this.camMode === 'chase') {
-      const dist = 10.5 + Math.min(4, Math.abs(this.v) * 0.08);
+      // tall (phone) screens: pull back and look further down the road so the van sits low in the frame
+      const tall = cam.aspect < 0.8;
+      const dist = 10.5 + Math.min(4, Math.abs(this.v) * 0.08) + (tall ? 2.5 : 0);
       const px = 2 - dist * Math.cos(lag), pz = -dist * Math.sin(lag);
-      const y = Math.max(3.7 + Math.min(1.2, Math.abs(this.v) * 0.03), gh(px, pz) + 1.4); // never inside a hill
+      const y = Math.max(3.7 + Math.min(1.2, Math.abs(this.v) * 0.03) + (tall ? 0.9 : 0), gh(px, pz) + 1.4); // never inside a hill
       cam.position.set(px, y, pz);
-      ctl.target.set(4.2 + 5, 1.5, this.camLook * 1.6);
+      ctl.target.set(4.2 + (tall ? 14 : 5), tall ? 1.2 : 1.5, this.camLook * 1.6);
       cam.lookAt(ctl.target);
     } else if (this.camMode === 'cockpit') {
       const vr = this.world.vanRoot;

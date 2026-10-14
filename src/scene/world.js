@@ -8,6 +8,7 @@ import { Walker } from './walk.js';
 import { addProps } from './props.js';
 import { Land } from './land.js';
 import { Effects } from './effects.js';
+import * as VEH from './vehicles.js';
 import { Traffic, Wildlife } from './life.js';
 import { World as GenWorld } from '../world/gen.js';
 import { Driver } from './drive.js';
@@ -69,6 +70,7 @@ export class World {
     this.land = this.terrain;
     this.driver = new Driver(this);
     this.fx = new Effects(this);
+    this.vehicles = VEH;
     this.traffic = new Traffic(this.terrain, this, this.stage);
     this.wildlife = new Wildlife(this.terrain, this, this.stage);
     this.setQuality(this.stage.quality || 'high');

@@ -8,6 +8,8 @@
 import * as THREE from 'three';
 import { weightReport } from '../sim/weight.js';
 import { SURFACES } from './land.js';
+import { Rig, SPEC } from '../sim/truck.js';
+import { TruckRig } from './truck.js';
 
 const L = 4.325; // wheelbase
 const TRACK = 1.73;
@@ -21,7 +23,8 @@ const DELTA_MAX = 0.5; // rad road-wheel angle (≈ 15.6 m turning circle)
 const V_MAX = 38; // m/s governed (≈ 137 km/h)
 
 export const CAMERA_MODES = ['chase', 'cockpit', 'orbit', 'cinematic'];
-const CAM_LABEL = { chase: 'Chase', cockpit: 'Cockpit', orbit: 'Orbit', cinematic: 'Cinematic' };
+const SEMI_CAMERA_MODES = ['chase', 'cockpit', 'trailer', 'orbit', 'cinematic'];
+const CAM_LABEL = { chase: 'Chase', cockpit: 'Cockpit', orbit: 'Orbit', cinematic: 'Cinematic', trailer: 'Trailer cam' };
 
 /** Driver-aid presets. Easy keeps the van on the road and out of trouble; Pro is the raw model. */
 export const ASSISTS = {
@@ -88,6 +91,12 @@ export class Driver {
     this.road = null; // nearest road info while on or near one
     this.colCache = { rects: [], circles: [], x: 1e9, z: 1e9 };
     this.gamepad = null;
+    this.vehicle = 'camper'; // 'camper' | 'semi'
+    this.rig = new Rig('dryvan', 14000);
+    this.truck = null; // visual semi, built on first use
+    this.semi = { trailer: 'dryvan', cargo: 14000, name: 'BIG SKY FREIGHT', style: 2, cargoLook: 'lumber', tint: [0.9, 0.9, 0.88], trailerTint: [0.92, 0.92, 0.9] };
+    this.parkBrake = false;
+    this.rollAmt = 0;
     const onKey = (e) => {
       if (!this.active || e.target.closest?.('input, select, textarea')) return;
       const k = e.key.toLowerCase();
@@ -105,6 +114,9 @@ export class Driver {
       else if (k === 'r') this.toggleGear();
       else if (k === 't') this.resetToRoad();
       else if (k === 'q') this.honk();
+      else if (this.vehicle === 'semi' && this.semiKey(k)) {
+        /* handled */
+      }
       else if (k === '=' || k === '+') this.nudgeCruise(+5);
       else if (k === '-' || k === '_') this.nudgeCruise(-5);
       this.onKeyAction?.(k);
@@ -140,6 +152,8 @@ export class Driver {
     this.cruise.on = false;
     this.gearSel = 'D';
     this.steerIn = this.thrIn = this.brkIn = 0;
+    if (this.vehicle !== 'semi' && this.camMode === 'trailer') this.camMode = 'chase';
+    this.applyVehicle();
     this.world.stage.controls.enabled = this.camMode === 'orbit';
   }
 
@@ -152,10 +166,13 @@ export class Driver {
     this.world.stage.controls.enabled = true;
     this.world.stage.controls.target.set(1.8, 1.3, 0);
     for (const b of this.beams) b.intensity = 0;
+    this.world.vanRoot.visible = true;
+    this.truck?.hide();
   }
 
   cycleCamera() {
-    this.camMode = CAMERA_MODES[(CAMERA_MODES.indexOf(this.camMode) + 1) % CAMERA_MODES.length];
+    const modes = this.vehicle === 'semi' ? SEMI_CAMERA_MODES : CAMERA_MODES;
+    this.camMode = modes[(modes.indexOf(this.camMode) + 1) % modes.length];
     this.world.stage.controls.enabled = this.camMode === 'orbit';
     if (this.camMode === 'orbit') {
       this.world.stage.controls.target.set(1.8, 1.3, 0);
@@ -208,6 +225,7 @@ export class Driver {
 
   /** Engine speed from a 9-speed automatic with fixed shift bands (for the tachometer and sound). */
   rpm(throttle = 0) {
+    if (this.vehicle === 'semi') return this.rig.rpm;
     const kmh = Math.abs(this.v) * 3.6;
     if (kmh < 2) return 760 + throttle * 600;
     const bands = [0, 18, 32, 46, 60, 75, 90, 105, 122, 145];
@@ -219,6 +237,7 @@ export class Driver {
 
   gear() {
     if (!this.active) return 'P';
+    if (this.vehicle === 'semi') return this.rig.gear < 0 ? 'R' : this.rig.gear === 0 ? 'N' : String(this.rig.gear);
     if (this.v > 0.15) return 'D';
     if (this.v < -0.15) return 'R';
     if (this.gearSel === 'R' || this.lastInput?.throttle < 0) return 'R';
@@ -246,6 +265,8 @@ export class Driver {
     this.cruise.on = false;
     this.gearSel = 'D';
     this.colCache.x = 1e9;
+    this.rig.place(yaw);
+    this.rollAmt = 0;
     this.world.fx?.clear();
   }
 
@@ -290,6 +311,156 @@ export class Driver {
     this.trail.push([x, z]);
     this.onEvent?.('reset');
     return e.name;
+  }
+
+  // ── Semi truck ─────────────────────────────────────────────────────────────
+  /** Show the right vehicle for the current `vehicle` (camper van or articulated semi). */
+  applyVehicle() {
+    const semi = this.vehicle === 'semi';
+    this.world.vanRoot.visible = !semi;
+    if (!semi) {
+      this.truck?.hide();
+      return;
+    }
+    this.truck ||= new TruckRig(this.world);
+    const S = this.semi;
+    this.rig.setLoad(S.trailer, S.cargo);
+    this.truck.setTrailer(S.trailer, S);
+    this.truck.setTint(S.tint, S.trailerTint);
+    this.rig.place(this.yaw);
+    this.rig.park = false;
+    this.rollAmt = 0;
+    for (const b of this.beams) b.intensity = 0;
+  }
+
+  setVehicle(kind, opts = {}) {
+    Object.assign(this.semi, opts);
+    this.vehicle = kind;
+    if (kind !== 'semi' && this.camMode === 'trailer') this.camMode = 'chase';
+    if (this.active) this.applyVehicle();
+  }
+
+  /** Steering-lock safety factor: Easy keeps the rig upright, Pro lets you roll it. */
+  safety() {
+    return this.cfg.assist === 'easy' ? 1 : this.cfg.assist === 'standard' ? 1.3 : 2.2;
+  }
+
+  /** Semi-only keys: E engine brake, P park brake, G auto/manual, X/Z shift up/down. */
+  semiKey(k) {
+    const rig = this.rig;
+    if (k === 'e') {
+      rig.engineBrake = !rig.engineBrake;
+      this.onKeyAction?.('enginebrake');
+    } else if (k === 'p') {
+      this.parkBrake = !this.parkBrake;
+      this.onKeyAction?.('park');
+    } else if (k === 'g') {
+      rig.auto = !rig.auto;
+      this.onKeyAction?.('auto');
+    } else if (k === 'x') this.pendingShift = 1;
+    else if (k === 'z') this.pendingShift = -1;
+    else return false;
+    return true;
+  }
+
+  stepSemi(h, inp) {
+    const T = this.world.terrain, rig = this.rig, A = this.assist;
+    if (rig.rolled) {
+      this.v = rig.v = 0;
+      this.noteRoll();
+      return;
+    }
+    const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
+    const sf = T.surfaceAt(this.x + SPEC.wheelbase * c, this.z - SPEC.wheelbase * s);
+    this.surface = sf;
+    this.surfaceKey = sf.key;
+    const thr = this.gearSel === 'R' ? Math.max(0, -inp.throttle) : Math.max(0, inp.throttle);
+    if (this.parkBrake && thr > 0.3 && A.hold) this.parkBrake = false;
+    const holding = this.parkBrake || (A.hold && thr === 0 && inp.brake < 0.05 && Math.abs(this.v) < 0.3);
+    rig.v = this.v;
+    rig.theta = this.yaw;
+    const sh = this.pendingShift || 0;
+    this.pendingShift = 0;
+    const out = rig.step(h, { throttle: thr, brake: inp.brake, steer: inp.steer, gearReq: this.gearSel, up: sh > 0, down: sh < 0 }, { mu: sf.mu, crr: sf.crr, grade: Math.sin(this.pitch), safety: this.safety(), park: holding });
+    this.v = rig.v;
+    if (sf.key === 'water' && this.v > 0) {
+      this.v = rig.v = 0;
+      this.emit('deep');
+    }
+    this.delta = rig.delta;
+    this.yawRate = out.yawRate;
+    this.aLong = rig.a || 0;
+    this.slip = Math.max(this.slip, rig.skid ? 1 : 0);
+    this.spinning = Math.max(this.spinning, rig.spinning || 0);
+    if (inp.brake > 0.7 && Math.abs(this.v) > 6 && sf.mu < 0.5) this.lock = Math.max(this.lock, 0.6);
+    const ym = (this.yaw + rig.theta) / 2;
+    this.yaw = rig.theta;
+    this.x += Math.cos(ym) * this.v * h;
+    this.z -= Math.sin(ym) * this.v * h;
+    this.collide();
+    this.spin += (this.v * h) / 0.52;
+    const dist = Math.abs(this.v * h);
+    this.odo += dist;
+    this.trip += dist;
+    const last = this.trail[this.trail.length - 1];
+    if (!last || Math.hypot(this.x - last[0], this.z - last[1]) > 4) {
+      this.trail.push([this.x, this.z]);
+      if (this.trail.length > 900) this.trail.shift();
+    }
+    if (rig.jack > 0.82) this.emit('jackknife');
+    if (rig.rollRisk > 0.75) this.emit('tipping');
+    if (rig.rolled) this.noteRoll();
+    this.noFuel = rig.fuel <= 0.05;
+  }
+
+  noteRoll() {
+    if (!this.rollSide) this.rollSide = Math.sign(this.yawRate) || 1;
+    this.emit('rollover');
+  }
+
+  poseSemi(dt) {
+    const W = this.world, rig = this.rig;
+    if (!rig.rolled) this.rollSide = 0;
+    const goal = rig.rolled ? this.rollSide * 1.5 : 0;
+    this.rollAmt += (goal - this.rollAmt) * (1 - Math.exp(-dt * (rig.rolled ? 2.2 : 8)));
+    const night = W.stage.night || W.stage.sunScene.y < 0.08;
+    const head = this.lights === 'on' || (this.lights === 'auto' && night);
+    this.truck.update(dt, this, rig, W.terrain, this.groundH, { cockpit: this.camMode === 'cockpit', lights: { head, brake: this.braking }, units: this.cfg.units, rolled: this.rollAmt });
+  }
+
+  cameraSemi(dt, lag, gh, cam, ctl) {
+    const tr = this.truck;
+    const mode = this.camMode;
+    const tall = cam.aspect < 0.8;
+    if (mode === 'chase') {
+      const dist = 25 + Math.min(6, Math.abs(this.v) * 0.2) + (tall ? 6 : 0);
+      const px = 3 - dist * Math.cos(lag), pz = -dist * Math.sin(lag);
+      const y = Math.max(7.2 + Math.min(1.5, Math.abs(this.v) * 0.04) + (tall ? 1.8 : 0), gh(px, pz) + 1.6);
+      cam.position.set(px, y, pz);
+      ctl.target.set(8 + (tall ? 22 : 10), 1.6, this.camLook * 2);
+      cam.lookAt(ctl.target);
+    } else if (mode === 'cockpit') {
+      tr.tractor.updateMatrixWorld(true);
+      cam.position.copy(tr.tractor.localToWorld(new THREE.Vector3(2.72, 2.62, -0.55)));
+      const t = tr.tractor.localToWorld(new THREE.Vector3(30, 2.2, -0.55 + this.delta * 6));
+      ctl.target.copy(t);
+      cam.lookAt(t);
+    } else if (mode === 'trailer') {
+      tr.trailerTilt.updateMatrixWorld(true);
+      const back = tr.hasTrailer ? tr.trailerTilt : tr.tractor;
+      const bx = tr.hasTrailer ? -17.4 : -3.5;
+      cam.position.copy(back.localToWorld(new THREE.Vector3(bx, 4.6, 0)));
+      const t = back.localToWorld(new THREE.Vector3(bx - 40, 1.0, 0));
+      ctl.target.copy(t);
+      cam.lookAt(t);
+    } else if (mode === 'cinematic') {
+      this.camT += dt * 0.1;
+      const a = this.camT + lag;
+      const px = -5 + Math.cos(a) * 22, pz = Math.sin(a) * 22;
+      cam.position.set(px, Math.max(3 + Math.sin(this.camT * 0.7) * 1.2, gh(px, pz) + 1.4), pz);
+      ctl.target.set(-4, 1.8, 0);
+      cam.lookAt(ctl.target);
+    }
   }
 
   // ── Input ──────────────────────────────────────────────────────────────────
@@ -447,9 +618,10 @@ export class Driver {
     const lat = r.side * s - w * 0.22; // + = right of the target lane centre
     const yrCmd = yrFF + 0.9 * err + 0.05 * lat;
     // road-wheel angle that produces that yaw rate (inverse of the bicycle model), then to steer 0..1
-    const delta = Math.atan((yrCmd * L * (1 + 0.0022 * this.v * this.v)) / Math.max(this.v, 3));
-    const speedK = Math.max(A.minSteer, 1 - Math.abs(this.v) / A.steerFade);
-    const want = Math.max(-0.8, Math.min(0.8, delta / (DELTA_MAX * speedK)));
+    const semi = this.vehicle === 'semi';
+    const delta = Math.atan((yrCmd * (semi ? SPEC.wheelbase : L) * (1 + (semi ? 0.0012 : 0.0022) * this.v * this.v)) / Math.max(this.v, 3));
+    const speedK = semi ? 1 : Math.max(A.minSteer, 1 - Math.abs(this.v) / A.steerFade);
+    const want = Math.max(-0.8, Math.min(0.8, delta / ((semi ? this.rig.steerLimit(this.v, this.safety()) : DELTA_MAX) * speedK)));
     const gain = Math.min(1, (this.v - 4) / 6) * (1 - Math.min(1, Math.abs(steer) / 0.3));
     return steer + want * gain * A.lane;
   }
@@ -459,9 +631,11 @@ export class Driver {
     const T = this.world.terrain;
     const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
     const at = (lx, lz) => T.heightAt(this.x + lx * c + lz * s, this.z - lx * s + lz * c);
-    const rl = at(0, -TRACK / 2), rr = at(0, TRACK / 2), fl = at(L, -TRACK / 2), fr = at(L, TRACK / 2);
+    const semi = this.vehicle === 'semi';
+    const WB = semi ? SPEC.wheelbase : L, TR = semi ? 1.9 : TRACK;
+    const rl = at(0, -TR / 2), rr = at(0, TR / 2), fl = at(WB, -TR / 2), fr = at(WB, TR / 2);
     const hr = (rl + rr) / 2, hf = (fl + fr) / 2;
-    return { h0: hr, pitch: Math.atan2(hf - hr, L), roll: -Math.atan2((rr + fr) / 2 - (rl + fl) / 2, TRACK) };
+    return { h0: hr, pitch: Math.atan2(hf - hr, WB), roll: -Math.atan2((rr + fr) / 2 - (rl + fl) / 2, TR) };
   }
 
   /** Posted limit for the surface under the van (km/h), refreshed a few times a second. */
@@ -486,7 +660,8 @@ export class Driver {
       this.road = T.roadAt(this.x, this.z) ? { ...T.roadAt(this.x, this.z) } : null;
       this.refreshColliders();
       this.slip = this.spinning = this.lock = 0;
-      for (let i = 0; i < steps; i++) this.step(h, inp);
+      if (this.vehicle === 'semi') for (let i = 0; i < steps; i++) this.stepSemi(h, inp);
+      else for (let i = 0; i < steps; i++) this.step(h, inp);
       this.updateLimit(dt);
       this.hornT = Math.max(0, this.hornT - dt);
       if (this.surface.kind === 'road' || this.surface.kind === 'street') this.lastRoad = { x: this.x, z: this.z, yaw: this.yaw };
@@ -519,6 +694,11 @@ export class Driver {
     T.update(this.x, this.z);
     W.stage.setYaw(this.yaw);
     this.groundH = ct.h0;
+    if (this.vehicle === 'semi' && this.active) {
+      this.poseSemi(dt);
+      this.camera(dt);
+      return;
+    }
     // wheels: rolling and steering
     for (const w of W.body.parts.wheels) {
       w.wheel.rotation.z = (w.side > 0 ? -1 : 1) * this.spin;
@@ -625,22 +805,43 @@ export class Driver {
     cc.t = performance.now();
   }
 
-  /** Van footprint as four circles along its centre line against nearby trunks, boulders and buildings. */
+  /** Footprint circles { x, z, r } in world coordinates: four along the van, or tractor plus trailer. */
+  bodyPoints() {
+    const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
+    if (this.vehicle !== 'semi') return [-1.2, 0.6, 2.4, 4.3].map((lx) => ({ x: this.x + lx * c, z: this.z - lx * s, r: 1.02 }));
+    const pts = [-1.2, 1.2, 3.4, 5.4, 7.0].map((lx) => ({ x: this.x + lx * c, z: this.z - lx * s, r: 1.3 }));
+    if (this.rig.trailer !== 'none') {
+      const g = this.rig.geometry(this.x, this.z);
+      const hx = Math.cos(this.rig.thetaT), hz = -Math.sin(this.rig.thetaT);
+      for (const d of [1.5, 4.5, 7.5, 10.5, 13.5, 15.4]) pts.push({ x: g.kx - hx * d, z: g.kz - hz * d, r: 1.35 });
+    }
+    return pts;
+  }
+
+  /** Solid things against the footprint circles. */
   collide() {
     const cc = this.colCache;
-    const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
     const F = this.assist.forgive;
-    for (const lx of [-1.2, 0.6, 2.4, 4.3]) {
-      const px = this.x + lx * c, pz = this.z - lx * s;
+    const semi = this.vehicle === 'semi';
+    const hit = (kind, weight) => {
+      const sp = Math.abs(this.v);
+      if (semi && sp > 1.5) {
+        this.rig.damage = Math.min(100, this.rig.damage + sp * sp * 0.02 * weight);
+        this.hitSpeed = sp;
+      }
+      this.emit(kind);
+    };
+    for (const q of this.bodyPoints()) {
+      const px = q.x, pz = q.z, R = q.r;
       for (const o of cc.circles) {
         const dx = px - o.x, dz = pz - o.z;
-        if (Math.abs(dx) > 4 || Math.abs(dz) > 4) continue;
-        const d = Math.hypot(dx, dz), min = 1.02 + o.r;
+        if (Math.abs(dx) > 5 || Math.abs(dz) > 5) continue;
+        const d = Math.hypot(dx, dz), min = R + o.r;
         if (d < min && d > 1e-4) {
           const push = min - d;
           this.x += (dx / d) * push;
           this.z += (dz / d) * push;
-          if (Math.abs(this.v) > 1.2) this.emit(o.kind || 'tree');
+          if (Math.abs(this.v) > 1.2) hit(o.kind || 'tree', 1);
           this.v *= -0.15 * F;
         }
       }
@@ -649,31 +850,32 @@ export class Driver {
         const cx = Math.max(r.x - hx, Math.min(r.x + hx, px)), cz = Math.max(r.z - hz, Math.min(r.z + hz, pz));
         const dx = px - cx, dz = pz - cz;
         const d = Math.hypot(dx, dz);
-        if (d >= 1.02) continue;
+        if (d >= R) continue;
         let nx, nz, push;
         if (d > 1e-4) {
           nx = dx / d;
           nz = dz / d;
-          push = 1.02 - d;
+          push = R - d;
         } else {
           // centre inside the footprint: leave by the nearest face
           const ox = hx - Math.abs(px - r.x), oz = hz - Math.abs(pz - r.z);
           if (ox < oz) {
             nx = Math.sign(px - r.x) || 1;
             nz = 0;
-            push = ox + 1.02;
+            push = ox + R;
           } else {
             nx = 0;
             nz = Math.sign(pz - r.z) || 1;
-            push = oz + 1.02;
+            push = oz + R;
           }
         }
         this.x += nx * push;
         this.z += nz * push;
-        if (Math.abs(this.v) > 1.5) this.emit('building');
+        if (Math.abs(this.v) > 1.5) hit('building', 2);
         this.v *= -0.1 * F;
       }
     }
+    if (semi) this.rig.v = this.v;
   }
 
   emit(kind) {
@@ -693,6 +895,7 @@ export class Driver {
     // look into the turn a little
     this.camLook += (this.delta * Math.min(1, Math.abs(this.v) / 10) * 3.5 - this.camLook) * (1 - Math.exp(-dt * 3));
     const gh = (lx, lz) => this.world.terrain.heightAt(this.x + lx * Math.cos(this.yaw) + lz * Math.sin(this.yaw), this.z - lx * Math.sin(this.yaw) + lz * Math.cos(this.yaw)) - (this.groundH ?? 0);
+    if (this.vehicle === 'semi') return this.cameraSemi(dt, lag, gh, cam, ctl);
     if (this.camMode === 'chase') {
       // tall (phone) screens: pull back and look further down the road so the van sits low in the frame
       const tall = cam.aspect < 0.8;

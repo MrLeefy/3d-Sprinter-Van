@@ -479,3 +479,13 @@ h2.title { margin: 0; font-family: var(--f-display); font-weight: 600; font-size
 .gp-tx span { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gp-x { border: 0; background: transparent; color: var(--muted); font-size: 20px; cursor: pointer; padding: 0 2px; }
 @media (max-width: 560px) { .ms-hint { display: none; } .ms-ctl { top: 52px; } }
+
+/* semi truck controls and warnings */
+#driveHud:not(.semi) .dh-semi-only, #driveHud.semi .dh-van-only, #driveHud:not(.manual) .dh-manual { display: none !important; }
+.dh-warn { position: absolute; left: 50%; top: 100px; transform: translateX(-50%); background: #b3261e; color: #fff; font-weight: 700; letter-spacing: .06em; font-size: 14px; padding: 7px 16px; border-radius: 8px; box-shadow: var(--shadow); animation: dhWarn 0.9s ease-in-out infinite alternate; pointer-events: none; white-space: nowrap; }
+@keyframes dhWarn { from { opacity: 1; } to { opacity: .55; } }
+.dh-aux button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
+.dh-aux button[aria-pressed="true"] small { color: #fff; }
+.dh-sub { display: block; margin-top: 8px; font-size: 12px; color: var(--muted); }
+#driveHud.semi .dh-aux { max-width: 232px; flex-direction: row; flex-wrap: wrap-reverse; justify-content: flex-end; }
+@media (max-width: 560px) { .dh-warn { top: 120px; font-size: 12px; } #driveHud.semi .dh-aux { max-width: 150px; } }

@@ -9,16 +9,23 @@ import { drawWorldMap } from './mapview.js';
 import { MapScreen } from './mapscreen.js';
 import { Services } from './services.js';
 import { Passport } from './passport.js';
+import { SPEC, TRAILER_CARGO } from '../sim/truck.js';
 
 const KEY = 'sprinter-drive-v2';
 const DEFAULTS = () => ({
   assist: 'standard', steerSens: 1, units: /^en-US/i.test(navigator.language || '') ? 'mph' : 'kmh', camShake: 1, sound: true, volume: 0.8,
   haptics: true, tilt: false, tiltInvert: false, season: 'auto', seenHelp: false,
+  vehicle: 'camper', trailer: 'dryvan', cargoPct: 0.6, manual: false,
 });
 const ASSIST_TEXT = {
   easy: 'Lane keeping, traction and stability control, soft pedals. Hard to get into trouble.',
   standard: 'Speed-sensitive steering and traction control. You hold your own lane.',
   pro: 'Raw physics: no aids, quick pedals, loose ground really is loose.',
+};
+const TRAILER_NAMES = { none: 'Bobtail', dryvan: 'Dry van', reefer: 'Reefer', flatbed: 'Flatbed', tanker: 'Tanker', logs: 'Log trailer', container: 'Container' };
+const cargoKg = (trailer, pct) => {
+  const r = TRAILER_CARGO[trailer];
+  return r ? Math.round((r[0] + (r[1] - r[0]) * pct) / 100) * 100 : 0;
 };
 const mph = (kmh) => Math.round(kmh * 0.621371);
 const limitSignValue = (kmh, units) => (units === 'mph' ? Math.round(mph(kmh) / 5) * 5 : Math.round(kmh / 5) * 5);
@@ -75,6 +82,7 @@ export class DriveUI {
       <button class="dh-btn primary" id="dhExit">Park · Esc</button>
     </div>
     <div class="dh-status" id="dhStatus" hidden></div>
+    <div class="dh-warn" id="dhWarn" hidden role="alert"></div>
     <div class="dh-cluster">
       <div class="dh-speed"><b id="dhSpeed">0</b><button id="dhUnit" class="dh-unit" aria-label="Switch units">mph</button></div>
       <div class="dh-limit" id="dhLimit" hidden aria-label="Posted speed limit"><i>SPEED<br>LIMIT</i><b id="dhLimitV">65</b></div>
@@ -87,7 +95,11 @@ export class DriveUI {
       </div>
       <div class="dh-meters">
         <div class="dh-m"><span>Fuel</span><i class="bar"><i id="dhFuel"></i></i><em id="dhFuelT"></em></div>
-        <div class="dh-m"><span>House battery</span><i class="bar"><i id="dhBat"></i></i><em id="dhBatT"></em></div>
+        <div class="dh-m dh-semi-only"><span>Air</span><i class="bar"><i id="dhAir"></i></i><em id="dhAirT"></em></div>
+        <div class="dh-m dh-semi-only"><span>Trailer angle</span><i class="bar"><i id="dhJack"></i></i><em id="dhJackT"></em></div>
+        <div class="dh-m dh-semi-only"><span>Brakes</span><i class="bar"><i id="dhBrk"></i></i><em id="dhBrkT"></em></div>
+        <div class="dh-m dh-semi-only"><span>Damage</span><i class="bar"><i id="dhDmg"></i></i><em id="dhDmgT"></em></div>
+        <div class="dh-m dh-van-only"><span>House battery</span><i class="bar"><i id="dhBat"></i></i><em id="dhBatT"></em></div>
         <div class="dh-m"><span>Engine</span><i class="bar"><i id="dhRpm"></i></i><em id="dhRpmT"></em></div>
       </div>
       <div class="dh-info"><span id="dhRoad">Track</span><span id="dhSurface">Grass</span><span id="dhSlope">0°</span><span id="dhOdo">0.00 km</span></div>
@@ -96,6 +108,10 @@ export class DriveUI {
     <div class="dh-aux">
       <button id="dhReset" title="T" aria-label="Reset to the nearest road">⤺<small>Road</small></button>
       <button id="dhHorn" title="Q" aria-label="Horn">📯<small>Horn</small></button>
+      <button id="dhPark" class="dh-semi-only" title="P" aria-label="Parking brake" aria-pressed="false">P<small>Park</small></button>
+      <button id="dhEngBrk" class="dh-semi-only" title="K" aria-label="Engine brake" aria-pressed="false">K<small>Jake</small></button>
+      <button id="dhShiftUp" class="dh-semi-only dh-manual" title="X" aria-label="Shift up">▲<small>Up</small></button>
+      <button id="dhShiftDn" class="dh-semi-only dh-manual" title="Z" aria-label="Shift down">▼<small>Down</small></button>
     </div>
     <div class="dh-pedals">
       <button id="dhGearBtn" class="dh-gearbtn" title="R" aria-label="Drive or reverse"><b>D</b><small>R</small></button>
@@ -105,6 +121,15 @@ export class DriveUI {
     <p class="dh-hint">W / ↑ go · S / ↓ brake · A D steer · Space handbrake · R reverse · V cruise · B limiter · T back on road · Q horn · C camera · M map</p>
     <div class="dh-sheet" id="dhSheet" hidden role="dialog" aria-label="Driving settings">
       <div class="dh-sh-top"><b>Driving</b><button class="dh-x" id="dhSheetX" aria-label="Close">×</button></div>
+      <div class="dh-row"><label>Vehicle</label>
+        <div class="dh-seg" id="sVehicle"><button data-v="camper">Camper van</button><button data-v="semi">Semi truck</button></div>
+        <div class="dh-semi-only" id="sSemiBox">
+          <label class="dh-sub">Trailer</label>
+          <div class="dh-seg four" id="sTrailer">${Object.entries(TRAILER_NAMES).map(([k, n]) => `<button data-v="${k}">${n}</button>`).join('')}</div>
+          <label class="dh-sub">Load <em id="sCargoV"></em></label><input type="range" id="sCargo" min="0" max="1" step="0.05">
+          <label class="dh-chk"><input type="checkbox" id="sManual"> Manual 10-speed (X / Z shift)</label>
+          <p class="dh-note">Changing the vehicle puts it down where you are, stopped.</p>
+        </div></div>
       <div class="dh-row"><label>Driving assist</label>
         <div class="dh-seg three" id="sAssist">${Object.entries(ASSISTS).map(([k, a]) => `<button data-v="${k}">${a.label}</button>`).join('')}</div>
         <p class="dh-note" id="sAssistNote"></p></div>
@@ -130,7 +155,9 @@ export class DriveUI {
         <tr><td><kbd>A</kbd> <kbd>D</kbd> <kbd>←</kbd> <kbd>→</kbd></td><td>Steer</td></tr><tr><td><kbd>Space</kbd></td><td>Handbrake</td></tr>
         <tr><td><kbd>R</kbd></td><td>Drive / Reverse (at a standstill)</td></tr><tr><td><kbd>V</kbd></td><td>Cruise control · <kbd>+</kbd> <kbd>−</kbd> to adjust</td></tr>
         <tr><td><kbd>B</kbd></td><td>Speed limiter (holds the posted limit)</td></tr><tr><td><kbd>T</kbd></td><td>Back on the nearest road</td></tr>
-        <tr><td><kbd>Q</kbd></td><td>Horn</td></tr><tr><td><kbd>C</kbd> <kbd>L</kbd> <kbd>M</kbd></td><td>Camera · lights · map</td></tr>
+        <tr><td><kbd>Q</kbd></td><td>Horn (air horn in the semi)</td></tr>
+        <tr><td><kbd>P</kbd> <kbd>K</kbd></td><td>Semi: parking brake · engine brake (use it on long downhills)</td></tr>
+        <tr><td><kbd>G</kbd> <kbd>X</kbd> <kbd>Z</kbd></td><td>Semi: auto / manual gearbox · shift up · shift down</td></tr><tr><td><kbd>C</kbd> <kbd>L</kbd> <kbd>M</kbd></td><td>Camera · lights · map</td></tr>
         <tr><td><kbd>E</kbd></td><td>Use a service (fuel, water, dump, shop) when stopped at one</td></tr><tr><td><kbd>Esc</kbd></td><td>Park</td></tr>
       </table>
       <p class="dh-note">Touch: drag anywhere on the left half to steer, hold Go or Brake on the right. Gamepad works too: stick steers, triggers go and brake, A handbrake, B drive/reverse, Y camera, X lights, bumpers cruise and limiter, Start back on road.</p>
@@ -142,6 +169,10 @@ export class DriveUI {
   bind() {
     const D = this.D, A = this.app;
     const $ = (s) => this.$(s);
+    const seg0 = (id, fn) => $(id).addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-v]');
+      if (b) fn(b.dataset.v);
+    });
     $('#dhExit').addEventListener('click', () => A.exitDrive());
     $('#dhCam').addEventListener('click', () => ($('#dhCam').textContent = `Camera · ${D.cycleCamera()}`));
     $('#dhLights').addEventListener('click', () => ($('#dhLights').textContent = `Lights · ${D.cycleLights()}`));
@@ -180,6 +211,18 @@ export class DriveUI {
     });
     $('#sHour').addEventListener('input', (e) => A.setHour(parseFloat(e.target.value)));
     $('#dhReset').addEventListener('click', () => D.resetToRoad());
+    const semiKey = (id, k) => $(id).addEventListener('click', () => {
+      D.semiKey(k);
+      this.syncSemi();
+    });
+    semiKey('#dhPark', 'p');
+    semiKey('#dhEngBrk', 'k');
+    semiKey('#dhShiftUp', 'x');
+    semiKey('#dhShiftDn', 'z');
+    seg0('#sVehicle', (v) => this.set({ vehicle: v }));
+    seg0('#sTrailer', (v) => this.set({ trailer: v }));
+    $('#sCargo').addEventListener('input', (e) => this.set({ cargoPct: parseFloat(e.target.value) }));
+    $('#sManual').addEventListener('change', (e) => this.set({ manual: e.target.checked }));
     $('#dhHorn').addEventListener('pointerdown', () => D.honk());
     $('#dhGearBtn').addEventListener('click', () => {
       if (Math.abs(D.v) > 1.5) A.toast('Come to a stop before changing between Drive and Reverse.');
@@ -262,6 +305,10 @@ export class DriveUI {
       else if (k === 'cruise') A.toast(D.cruise.on ? `Cruise set to ${this.fmtSpeed(D.cruise.v * 3.6)} — brake to cancel, + / − to adjust.` : 'Cruise off.');
       else if (k === 'limiter') A.toast(D.limiter ? 'Limiter on — the van will hold the posted limit.' : 'Limiter off.');
       else if (k === 'gear') A.toast(D.gearSel === 'R' ? 'Reverse — Go now backs up.' : 'Drive.');
+      else if (k === 'park') A.toast(D.parkBrake ? 'Parking brake set.' : 'Parking brake released.');
+      else if (k === 'enginebrake') A.toast(D.rig.engineBrake ? 'Engine brake on — it slows the rig on downhills when you lift off.' : 'Engine brake off.');
+      else if (k === 'auto') A.toast(D.rig.auto ? 'Automatic shifting.' : 'Manual — X shifts up, Z shifts down.');
+      this.syncSemi();
       $('#dhCam').textContent = `Camera · ${D.camLabel()}`;
       $('#dhLights').textContent = `Lights · ${D.lights}`;
     };
@@ -277,6 +324,7 @@ export class DriveUI {
       deep: 'Too deep to ford: the van stops before the water reaches the sills (≈ 0.6 m).', slide: 'Sliding — not enough grip for that speed on this surface.',
       stuck: 'Wheelspin — this rear-wheel-drive van cannot climb that slope on this surface. Back down and take the track, or press T to get back on the road.',
       animal: 'Thump — you hit a wildlife. The van is dented but drivable; repairs cost cash. Slow down at dusk and watch the road edges.', crash: 'Crunch — you hit another vehicle. Keep your distance and use the horn.', reset: `Back on the road${this.D.road ? ` — ${this.D.road.edge.name}` : ''}.`, noRoad: 'No road within 1.4 km — try the map and drive toward a town.', cruiseLow: 'Cruise control needs a little speed first.', curve: 'Curve ahead — easing off the throttle.',
+      jackknife: 'Jack-knife! Ease off and straighten the wheel — never brake hard while the trailer is folding.', tipping: 'Tipping! Slow down — a loaded trailer rolls in a fast turn.', recovered: 'Recovery crew has stood the rig back up on the road.', rollover: 'Rolled over. Press T to get the rig upright back on the road (it costs a recovery fee).',
     }[kind];
     if (msg) A.toast(msg);
     if (this.s.haptics && navigator.vibrate) {
@@ -285,6 +333,10 @@ export class DriveUI {
     }
     if (kind === 'animal') this.services?.penalty(120, 'repairs');
     if (kind === 'crash') this.services?.penalty(60, 'a fender-bender');
+    if (kind === 'recovered') {
+      this.services?.penalty(900, 'the tow and recovery');
+      this.D.rig.damage = Math.min(100, this.D.rig.damage + 15);
+    }
     this.modules.forEach((m) => m.onDriveEvent?.(kind));
   }
 
@@ -321,8 +373,40 @@ export class DriveUI {
     this.$('#sHaptics').checked = s.haptics;
     this.$('#sTilt').checked = s.tilt;
     this.$('#dhAssist').textContent = ASSISTS[s.assist].label;
+    this.applyVehicle();
     this.$('#dhUnit').textContent = s.units === 'mph' ? 'mph' : 'km/h';
     void initial;
+  }
+
+  /** Choose the van or a semi (with trailer and load) from the settings. */
+  applyVehicle() {
+    const s = this.s, D = this.D;
+    const semi = s.vehicle === 'semi';
+    const kg = cargoKg(s.trailer, s.cargoPct);
+    const key = `${s.vehicle}|${semi ? s.trailer : ''}`;
+    if (key !== this.vkey) {
+      this.vkey = key;
+      D.setVehicle(s.vehicle, { trailer: s.trailer, cargo: kg });
+    } else if (semi && kg !== D.semi.cargo) {
+      D.semi.cargo = kg;
+      D.rig.setLoad(s.trailer, kg);
+    }
+    D.rig.auto = !s.manual;
+    this.root.classList.toggle('semi', semi);
+    this.root.classList.toggle('manual', semi && s.manual);
+    this.root.querySelectorAll('#sVehicle button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === s.vehicle)));
+    this.root.querySelectorAll('#sTrailer button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === s.trailer)));
+    this.$('#sCargo').value = s.cargoPct;
+    this.$('#sCargo').disabled = s.trailer === 'none';
+    this.$('#sCargoV').textContent = s.trailer === 'none' ? '—' : `${(kg / 1000).toFixed(1)} t`;
+    this.$('#sManual').checked = s.manual;
+    this.syncSemi();
+  }
+
+  syncSemi() {
+    const D = this.D;
+    this.$('#dhPark').setAttribute('aria-pressed', String(D.parkBrake));
+    this.$('#dhEngBrk').setAttribute('aria-pressed', String(D.rig.engineBrake));
   }
 
   /** Phone layouts keep the road clear: every button lives in a drop-down menu. */
@@ -398,9 +482,16 @@ export class DriveUI {
     this.$('#dhGearBtn').firstElementChild.textContent = D.gearSel;
     this.$('#dhGearBtn').classList.toggle('rev', D.gearSel === 'R');
     const thr = Math.max(0, D.lastInput?.throttle || 0);
+    const semi = D.vehicle === 'semi';
     const rpm = D.rpm(thr);
-    this.$('#dhRpm').style.width = `${Math.min(100, (rpm / 4200) * 100)}%`;
+    this.$('#dhRpm').style.width = `${Math.min(100, (rpm / (semi ? 2200 : 4200)) * 100)}%`;
     this.$('#dhRpmT').textContent = `${Math.round(rpm / 10) * 10} rpm`;
+    A.sound?.setTruck?.(semi);
+    if (semi) {
+      const bp = D.rig.brakeP;
+      if (this.lastBrakeP > 0.35 && bp < 0.08) A.sound?.hiss(Math.min(1, this.lastBrakeP));
+      this.lastBrakeP = bp;
+    }
     A.sound?.update(rpm, thr, Math.abs(D.v), D.surface.kind === 'road' || D.surface.kind === 'street' ? 0 : 1, true, Math.max(D.slip * 0.8, D.lock, D.spinning * 0.5));
     // badges
     this.$('#dhCruise').setAttribute('aria-pressed', String(D.cruise.on));
@@ -417,9 +508,11 @@ export class DriveUI {
     if (this.t <= 0) {
       this.t = 0.25;
       const s = A.snap;
-      const fuelPct = (s && A.simState.fuelL / A.fuelCap) || 0;
+      const fuelL = semi ? D.rig.fuel : A.simState.fuelL;
+      const fuelPct = semi ? D.rig.fuel / SPEC.fuelTank : (s && A.simState.fuelL / A.fuelCap) || 0;
       this.$('#dhFuel').style.width = `${Math.round(Math.min(1, fuelPct) * 100)}%`;
-      this.$('#dhFuelT').textContent = `${A.simState.fuelL.toFixed(0)} L`;
+      this.$('#dhFuelT').textContent = `${fuelL.toFixed(0)} L`;
+      if (semi) this.tickSemi();
       const fc = this.$('#dhFuelChip');
       fc.firstElementChild.textContent = String(Math.round(Math.min(1, fuelPct) * 100));
       fc.classList.toggle('low', fuelPct < 0.15);
@@ -442,6 +535,31 @@ export class DriveUI {
     this.root.classList.toggle('orbit', D.camMode === 'orbit');
     if (this.hintT > 0 && (this.hintT -= dt) <= 0) this.$('.dh-hint').classList.add('gone');
     for (const m of this.modules) m.tick?.(dt, this);
+  }
+
+  /** Truck gauges and warnings (4 Hz). */
+  tickSemi() {
+    const D = this.D, r = D.rig;
+    const set = (id, f, t) => {
+      this.$(`#${id}`).style.width = `${Math.round(Math.max(0, Math.min(1, f)) * 100)}%`;
+      this.$(`#${id}T`).textContent = t;
+    };
+    set('dhAir', r.air / 125, `${Math.round(r.air)} psi`);
+    set('dhJack', r.trailer === 'none' ? 0 : r.jack, r.trailer === 'none' ? 'bobtail' : `${Math.round(Math.abs((Math.atan2(Math.sin(r.theta - r.thetaT), Math.cos(r.theta - r.thetaT)) * 180) / Math.PI))}°`);
+    set('dhBrk', (r.brakeTemp - 40) / 420, `${Math.round(r.brakeTemp)} °C`);
+    set('dhDmg', r.damage / 100, `${Math.round(r.damage)} %`);
+    let w = '';
+    if (r.rolled) w = 'ROLLED OVER — press T';
+    else if (r.jack > 0.8) w = 'JACK-KNIFE';
+    else if (r.rollRisk > 0.75) w = 'TIPPING — SLOW DOWN';
+    else if (r.air < 70) w = 'LOW AIR PRESSURE';
+    else if (r.fade > 0.2) w = 'BRAKES FADING — USE ENGINE BRAKE';
+    else if (r.fuel / SPEC.fuelTank < 0.12) w = 'LOW FUEL';
+    else if (D.parkBrake) w = 'PARKING BRAKE';
+    const el = this.$('#dhWarn');
+    el.hidden = !w;
+    el.textContent = w;
+    this.syncSemi();
   }
 
   placeLabel() {

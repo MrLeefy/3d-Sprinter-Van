@@ -6,6 +6,11 @@ export class EngineSound {
     this.ctx = null;
     this.on = true;
     this.volume = 1;
+    this.truck = false; // 6-cylinder heavy diesel with air-brake hiss and an air horn
+  }
+
+  setTruck(on) {
+    this.truck = !!on;
   }
 
   start() {
@@ -83,6 +88,7 @@ export class EngineSound {
   horn() {
     if (!this.ctx || !this.on) return;
     const ctx = this.ctx, t = ctx.currentTime;
+    if (this.truck) return this.airHorn();
     const g = ctx.createGain();
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(0.22 * this.volume, t + 0.03);
@@ -102,15 +108,56 @@ export class EngineSound {
     }
   }
 
+  /** Three-chime air horn. */
+  airHorn() {
+    const ctx = this.ctx, t = ctx.currentTime;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.26 * this.volume, t + 0.05);
+    g.gain.setValueAtTime(0.26 * this.volume, t + 0.85);
+    g.gain.linearRampToValueAtTime(0, t + 1.0);
+    g.connect(ctx.destination);
+    for (const f of [220, 277, 330]) {
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = f;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 1100;
+      o.connect(lp).connect(g);
+      o.start(t);
+      o.stop(t + 1.02);
+    }
+  }
+
+  /** Air-brake release: a short burst of filtered noise. */
+  hiss(strength = 1) {
+    if (!this.ctx || !this.on) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const n = ctx.createBufferSource();
+    const buf = ctx.createBuffer(1, ctx.sampleRate * 0.7, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    n.buffer = buf;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 2800;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.16 * strength * this.volume, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
+    n.connect(hp).connect(g).connect(ctx.destination);
+    n.start(t);
+  }
+
   /** rpm, throttle 0..1, speed m/s, offroad 0..1, active (engine running), slip 0..1 (tyre squeal) */
   update(rpm, throttle, speed, offroad, active, slip = 0) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime, k = 0.08;
-    const f = (rpm / 60) * 2;
+    const f = (rpm / 60) * (this.truck ? 3 : 2);
     this.fire.frequency.setTargetAtTime(f, t, k);
     this.sub.frequency.setTargetAtTime(f / 2, t, k);
-    this.lp.frequency.setTargetAtTime(260 + throttle * 900 + rpm * 0.08, t, k);
-    this.gClat.gain.setTargetAtTime(0.012 + throttle * 0.03, t, k);
+    this.lp.frequency.setTargetAtTime((this.truck ? 200 : 260) + throttle * (this.truck ? 650 : 900) + rpm * (this.truck ? 0.12 : 0.08), t, k);
+    this.gClat.gain.setTargetAtTime(this.truck ? 0.02 + throttle * 0.045 : 0.012 + throttle * 0.03, t, k);
     this.gWind.gain.setTargetAtTime(Math.min(0.22, speed * speed * 0.00018), t, 0.2);
     this.gTyre.gain.setTargetAtTime(Math.min(0.12, offroad * speed * 0.012), t, 0.15);
     this.gSqueal.gain.setTargetAtTime(Math.min(0.07, slip * Math.min(1, speed / 12) * 0.07), t, 0.08);

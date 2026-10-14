@@ -1,6 +1,7 @@
 // Services and wallet. Stop at a pump, tap, dump station, campground or shop and a card offers what
 // the place sells. Purchases change the live simulation state (diesel, fresh and grey water, shore
 // power), so the data panels and the drive HUD react immediately. Cash is saved in localStorage.
+import { SPEC } from '../sim/truck.js';
 import { VAN } from '../data/vehicle.js';
 import { WATER } from '../data/plumbing.js';
 import { hash2 } from '../world/noise.js';
@@ -106,16 +107,18 @@ export class Services {
     const D = this.D, A = this.app;
     this.t -= dt;
     // out of diesel
-    const fuel = A.simState.fuelL;
+    const semi = D.vehicle === 'semi';
+    const fuel = semi ? D.rig.fuel : A.simState.fuelL;
+    const tank = semi ? SPEC.fuelTank : VAN.fuelTank.v;
     D.noFuel = fuel <= 0.05;
     if (D.noFuel && !this.empty) {
       this.empty = true;
       A.toast('Out of diesel! Coast to a stop. Tap Map → Nearest fuel for the closest pump (or press T to get back on a road).');
     } else if (!D.noFuel) this.empty = false;
-    if (!this.lowWarned && fuel < VAN.fuelTank.v * 0.15) {
+    if (!this.lowWarned && fuel < tank * 0.15) {
       this.lowWarned = true;
       A.toast(`Fuel low (${fuel.toFixed(0)} L). Open the map and tap “Nearest fuel”.`);
-    } else if (fuel > VAN.fuelTank.v * 0.3) this.lowWarned = false;
+    } else if (fuel > tank * 0.3) this.lowWarned = false;
     if (this.t > 0) return;
     this.t = 0.3;
     const slow = Math.abs(D.v) < 5;
@@ -198,7 +201,8 @@ export class Services {
   refresh() {
     const s = this.app.simState;
     const set = (k, v) => this.el.querySelectorAll(`[data-k="${k}"]`).forEach((e) => (e.textContent = v));
-    set('fuel', `${s.fuelL.toFixed(0)} / ${VAN.fuelTank.v.toFixed(0)} L`);
+    const semi = this.D.vehicle === 'semi';
+    set('fuel', semi ? `${this.D.rig.fuel.toFixed(0)} / ${SPEC.fuelTank} L` : `${s.fuelL.toFixed(0)} / ${VAN.fuelTank.v.toFixed(0)} L`);
     set('fresh', `${s.freshL.toFixed(0)} / ${WATER.freshUsableL} L`);
     set('grey', `${s.greyL.toFixed(0)} / ${WATER.greyL} L`);
     set('urine', `${s.urineL.toFixed(1)} / ${WATER.urineL} L`);
@@ -213,14 +217,17 @@ export class Services {
 
   act(z, a) {
     const A = this.app, s = A.simState;
-    const cap = VAN.fuelTank.v;
+    const semi = this.D.vehicle === 'semi';
+    const cap = semi ? SPEC.fuelTank : VAN.fuelTank.v;
+    const have = semi ? this.D.rig.fuel : s.fuelL;
     if (a === 'fill' || a === 'fill20') {
-      const want = a === 'fill' ? cap - s.fuelL : Math.min(20, cap - s.fuelL);
+      const want = a === 'fill' ? cap - have : Math.min(semi ? 100 : 20, cap - have);
       if (want < 0.5) return A.toast('The tank is already full.');
       const price = this.dieselPrice(z) / GAL;
       const cost = want * price;
       if (!this.pay(cost, `${want.toFixed(0)} L of diesel`)) return;
-      s.fuelL += want;
+      if (semi) this.D.rig.fuel += want;
+      else s.fuelL += want;
       this.stats.fuelL += want;
       this.ui.passport?.log(`Bought ${want.toFixed(0)} L of diesel in ${z.node.name} (${money(cost)})`);
       this.ui.passport?.achieve?.('refuel');

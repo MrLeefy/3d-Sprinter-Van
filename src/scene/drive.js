@@ -168,6 +168,7 @@ export class Driver {
     for (const b of this.beams) b.intensity = 0;
     this.world.vanRoot.visible = true;
     this.truck?.hide();
+    this.restoreFov();
   }
 
   cycleCamera() {
@@ -275,6 +276,7 @@ export class Driver {
    * heading. Searches outward in rings; returns the road name (or null if none within ~1.4 km).
    */
   resetToRoad() {
+    const wasRolled = this.vehicle === 'semi' && this.rig.rolled;
     const W = this.world.gen;
     W.buildEdgesFor(this.x - 1500, this.z - 1500, this.x + 1500, this.z + 1500, Infinity);
     let best = null;
@@ -309,7 +311,7 @@ export class Driver {
     const x = cx + -tz * off, z = cz + tx * off;
     this.place(x, z, Math.atan2(-tz, tx));
     this.trail.push([x, z]);
-    this.onEvent?.('reset');
+    this.onEvent?.(wasRolled ? 'recovered' : 'reset');
     return e.name;
   }
 
@@ -320,6 +322,7 @@ export class Driver {
     this.world.vanRoot.visible = !semi;
     if (!semi) {
       this.truck?.hide();
+      this.restoreFov();
       return;
     }
     this.truck ||= new TruckRig(this.world);
@@ -329,6 +332,7 @@ export class Driver {
     this.truck.setTint(S.tint, S.trailerTint);
     this.rig.place(this.yaw);
     this.rig.park = false;
+    this.v = 0;
     this.rollAmt = 0;
     for (const b of this.beams) b.intensity = 0;
   }
@@ -345,10 +349,10 @@ export class Driver {
     return this.cfg.assist === 'easy' ? 1 : this.cfg.assist === 'standard' ? 1.3 : 2.2;
   }
 
-  /** Semi-only keys: E engine brake, P park brake, G auto/manual, X/Z shift up/down. */
+  /** Semi-only keys: K engine brake, P park brake, G auto/manual, X/Z shift up/down. */
   semiKey(k) {
     const rig = this.rig;
-    if (k === 'e') {
+    if (k === 'k') {
       rig.engineBrake = !rig.engineBrake;
       this.onKeyAction?.('enginebrake');
     } else if (k === 'p') {
@@ -428,21 +432,34 @@ export class Driver {
     this.truck.update(dt, this, rig, W.terrain, this.groundH, { cockpit: this.camMode === 'cockpit', lights: { head, brake: this.braking }, units: this.cfg.units, rolled: this.rollAmt });
   }
 
+  restoreFov() {
+    if (!this.fovTouched) return;
+    this.fovTouched = false;
+    this.world.stage.onResize();
+  }
+
   cameraSemi(dt, lag, gh, cam, ctl) {
     const tr = this.truck;
     const mode = this.camMode;
     const tall = cam.aspect < 0.8;
+    if (mode === 'cockpit') {
+      if (cam.fov !== 66) {
+        cam.fov = 66;
+        cam.updateProjectionMatrix();
+        this.fovTouched = true;
+      }
+    } else this.restoreFov();
     if (mode === 'chase') {
-      const dist = 25 + Math.min(6, Math.abs(this.v) * 0.2) + (tall ? 6 : 0);
+      const dist = 27 + Math.min(6, Math.abs(this.v) * 0.2) + (tall ? 7 : 0);
       const px = 3 - dist * Math.cos(lag), pz = -dist * Math.sin(lag);
-      const y = Math.max(7.2 + Math.min(1.5, Math.abs(this.v) * 0.04) + (tall ? 1.8 : 0), gh(px, pz) + 1.6);
+      const y = Math.max(8.8 + Math.min(1.5, Math.abs(this.v) * 0.04) + (tall ? 2.2 : 0), gh(px, pz) + 1.6);
       cam.position.set(px, y, pz);
-      ctl.target.set(8 + (tall ? 22 : 10), 1.6, this.camLook * 2);
+      ctl.target.set(10 + (tall ? 26 : 14), 1.2, this.camLook * 2);
       cam.lookAt(ctl.target);
     } else if (mode === 'cockpit') {
       tr.tractor.updateMatrixWorld(true);
-      cam.position.copy(tr.tractor.localToWorld(new THREE.Vector3(2.72, 2.62, -0.55)));
-      const t = tr.tractor.localToWorld(new THREE.Vector3(30, 2.2, -0.55 + this.delta * 6));
+      cam.position.copy(tr.tractor.localToWorld(new THREE.Vector3(2.6, 2.46, -0.55)));
+      const t = tr.tractor.localToWorld(new THREE.Vector3(30, 2.1, -0.55 + this.delta * 6));
       ctl.target.copy(t);
       cam.lookAt(t);
     } else if (mode === 'trailer') {

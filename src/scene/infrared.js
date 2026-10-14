@@ -155,6 +155,8 @@ export class Infrared {
     if (on) {
       this.world.terrain.setMaterial(this.groundMat);
       this.world.fx?.setVisible(false);
+      this.world.traffic?.setVisible(false);
+      this.world.wildlife?.setVisible(false);
       st.scene.fog = null;
       st.renderer.toneMapping = THREE.NoToneMapping;
       st.renderer.toneMappingExposure = 1;
@@ -164,6 +166,8 @@ export class Infrared {
     } else {
       this.world.terrain.setMaterial(null);
       this.world.fx?.setVisible(true);
+      this.world.traffic?.setVisible(true);
+      this.world.wildlife?.setVisible(true);
       st.scene.fog = st.fog;
       st.scene.background = null;
       st.renderer.toneMapping = THREE.ACESFilmicToneMapping;

@@ -791,7 +791,7 @@ export class App {
   setQuality(tier, byUser = false) {
     this.quality = tier;
     if (byUser) this.qualityAuto = false;
-    this.world.stage.setQuality(tier);
+    this.world.setQuality(tier);
     this.$('#quality').value = tier;
   }
 

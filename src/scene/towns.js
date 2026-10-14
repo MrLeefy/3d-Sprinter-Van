@@ -19,7 +19,7 @@ const decode = (key) => [Math.floor(key / 65536) - 32768, (key % 65536) - 32768]
 const CAR_COLS = [[0.92, 0.92, 0.9], [0.7, 0.72, 0.74], [0.12, 0.12, 0.13], [0.62, 0.1, 0.09], [0.12, 0.22, 0.45], [0.16, 0.34, 0.22], [0.55, 0.45, 0.3], [0.35, 0.37, 0.4], [0.85, 0.7, 0.15]].map(lin);
 
 function boxGeo(parts) {
-  const P = [], N = [], C = [], B = [], I = [];
+  const P = [], N = [], C = [], B = [], GL = [], I = [];
   const faces = [
     [[1, 0, 0], [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]]],
     [[-1, 0, 0], [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]]],
@@ -28,7 +28,7 @@ function boxGeo(parts) {
     [[0, 0, 1], [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]]],
     [[0, 0, -1], [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]]],
   ];
-  for (const [x0, x1, y0, y1, z0, z1, col, body] of parts) {
+  for (const [x0, x1, y0, y1, z0, z1, col, body, glow = 0] of parts) {
     for (const [n, q] of faces) {
       const b = P.length / 3;
       for (const c of q) {
@@ -36,6 +36,7 @@ function boxGeo(parts) {
         N.push(...n);
         C.push(...col);
         B.push(body ? 1 : 0);
+        GL.push(glow);
       }
       I.push(b, b + 1, b + 2, b, b + 2, b + 3);
     }
@@ -45,15 +46,29 @@ function boxGeo(parts) {
   g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
   g.setAttribute('aBody', new THREE.Float32BufferAttribute(B, 1));
+  g.setAttribute('aGlow', new THREE.Float32BufferAttribute(GL, 1));
   g.setIndex(I);
   return g;
 }
 
-const GLASS = lin([0.14, 0.2, 0.26]), TYRE = lin([0.04, 0.04, 0.045]), WHITE = [1, 1, 1];
-function carGeometry(kind) {
-  const wheels = (xs, hw, r = 0.36) => xs.flatMap((x) => [-1, 1].map((s) => [x - r, x + r, 0, r * 2, s * hw - 0.13, s * hw + 0.13, TYRE, 0]));
+const GLASS = lin([0.14, 0.2, 0.26]), TYRE = lin([0.04, 0.04, 0.045]), WHITE = [1, 1, 1], LAMP = [1, 0.95, 0.85], TAIL = [0.9, 0.05, 0.04];
+const lamps = (xf, xb, y, hw) => [-1, 1].flatMap((sd) => [[xf, xf + 0.06, y, y + 0.16, sd * hw - 0.17, sd * hw + 0.17, LAMP, 0, 1], [xb - 0.06, xb, y, y + 0.16, sd * hw - 0.17, sd * hw + 0.17, TAIL, 0, 2]]);
+const shift = (parts, dx) => parts.map((p) => [p[0] + dx, p[1] + dx, ...p.slice(2)]);
+const wheelsAt = (xs, hw, r = 0.36) => xs.flatMap((x) => [-1, 1].map((s) => [x - r, x + r, 0, r * 2, s * hw - 0.13, s * hw + 0.13, TYRE, 0]));
+function tractorParts() {
+  return [
+    [-3.6, 3.4, 0.7, 1.35, -1.25, 1.25, lin([0.75, 0.76, 0.78]), 0],
+    [1.2, 3.4, 1.35, 3.2, -1.25, 1.25, WHITE, 1],
+    [2.9, 3.42, 2.0, 2.9, -1.1, 1.1, GLASS, 0],
+    [3.4, 3.7, 0.8, 1.6, -1.1, 1.1, STEEL, 0],
+    [-3.0, -0.6, 1.35, 1.55, -1.2, 1.2, lin([0.25, 0.25, 0.27]), 0],
+    ...lamps(3.7, -3.6, 0.9, 0.9),
+    ...wheelsAt([-2.6, -1.1, 2.3], 1.05, 0.5),
+  ];
+}
+/** Car bodies, forward = +x. 0 sedan, 1 pickup, 2 tractor, 3 tractor + trailer, 4 motorhome. */
+export function carGeometry(kind) {
   if (kind === 1) {
-    // pickup: forward = +x
     return boxGeo([
       [-2.7, 2.7, 0.42, 1.12, -0.95, 0.95, WHITE, 1],
       [-0.3, 1.5, 1.12, 1.66, -0.88, 0.88, GLASS, 0],
@@ -61,36 +76,51 @@ function carGeometry(kind) {
       [-2.7, -0.4, 1.12, 1.45, -0.95, -0.82, WHITE, 1],
       [-2.7, -0.4, 1.12, 1.45, 0.82, 0.95, WHITE, 1],
       [-2.7, -2.58, 1.12, 1.45, -0.95, 0.95, WHITE, 1],
-      ...wheels([-1.65, 1.65], 0.85, 0.4),
+      ...lamps(2.7, -2.7, 0.78, 0.7),
+      ...wheelsAt([-1.65, 1.65], 0.85, 0.4),
     ]);
   }
-  if (kind === 2) {
-    // truck tractor
+  if (kind === 2) return boxGeo(tractorParts());
+  if (kind === 3) {
     return boxGeo([
-      [-3.6, 3.4, 0.7, 1.35, -1.25, 1.25, lin([0.75, 0.76, 0.78]), 0],
-      [1.2, 3.4, 1.35, 3.2, -1.25, 1.25, WHITE, 1],
-      [2.9, 3.42, 2.0, 2.9, -1.1, 1.1, GLASS, 0],
-      [3.4, 3.7, 0.8, 1.6, -1.1, 1.1, STEEL, 0],
-      [-3.0, -0.6, 1.35, 1.55, -1.2, 1.2, lin([0.25, 0.25, 0.27]), 0],
-      ...wheels([-2.6, -1.1, 2.3], 1.05, 0.5),
+      ...shift(tractorParts(), 6.4),
+      [-10.2, 2.6, 1.0, 4.1, -1.3, 1.3, WHITE, 1],
+      [-10.2, 2.6, 0.55, 1.0, -1.1, 1.1, lin([0.2, 0.2, 0.22]), 0],
+      [-10.35, -10.2, 3.2, 3.7, -0.9, 0.9, TAIL, 0, 2],
+      ...wheelsAt([-8.4, -7.0], 1.1, 0.5),
+    ]);
+  }
+  if (kind === 4) {
+    return boxGeo([
+      [-3.6, 3.6, 0.7, 3.5, -1.25, 1.25, WHITE, 1],
+      [3.4, 3.65, 1.7, 2.9, -1.1, 1.1, GLASS, 0],
+      [-3.6, 3.6, 3.5, 3.58, -1.2, 1.2, lin([0.75, 0.75, 0.77]), 0],
+      [-3.0, 0.8, 1.7, 2.7, 1.24, 1.27, GLASS, 0],
+      ...lamps(3.65, -3.6, 0.9, 0.85),
+      ...wheelsAt([-2.4, 2.4], 1.0, 0.45),
     ]);
   }
   return boxGeo([
     [-2.3, 2.3, 0.38, 0.98, -0.88, 0.88, WHITE, 1],
     [-1.1, 1.0, 0.98, 1.4, -0.8, 0.8, GLASS, 0],
     [-1.0, 0.9, 1.4, 1.46, -0.8, 0.8, WHITE, 1],
-    ...wheels([-1.4, 1.4], 0.78, 0.33),
+    ...lamps(2.3, -2.3, 0.62, 0.6),
+    ...wheelsAt([-1.4, 1.4], 0.78, 0.33),
   ]);
 }
 
-function carMaterial() {
+export function carMaterial(season) {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.38, metalness: 0.3, envMapIntensity: 1 });
   m.onBeforeCompile = (sh) => {
+    sh.uniforms.uNight = season.u.uNight;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aBody;\nattribute vec3 aCarCol;')
-      .replace('#include <color_vertex>', '#include <color_vertex>\nvColor.xyz *= mix(vec3(1.0), aCarCol, aBody);');
+      .replace('#include <common>', '#include <common>\nattribute float aBody;\nattribute vec3 aCarCol;\nattribute float aGlow;\nvarying float vGlow;')
+      .replace('#include <color_vertex>', '#include <color_vertex>\nvColor.xyz *= mix(vec3(1.0), aCarCol, aBody);\nvGlow = aGlow;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vGlow;\nuniform float uNight;')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += (vGlow > 1.5 ? vec3(1.0, 0.05, 0.03) : vec3(1.0, 0.92, 0.75)) * step(0.5, vGlow) * (0.25 + uNight * 2.6);');
   };
-  m.customProgramCacheKey = () => 'townCars';
+  m.customProgramCacheKey = () => 'townCars2';
   return m;
 }
 
@@ -278,7 +308,7 @@ export class Towns {
     this.conifers = mk(conifer(), vm.pine, 1400);
     this.broads = mk(broadleaf(), vm.broad, 2400);
     this.conifers.receiveShadow = this.broads.receiveShadow = true;
-    const cmat = carMaterial();
+    const cmat = carMaterial(this.season);
     this.cars = [0, 1, 2].map((k) =>
       mk(carGeometry(k), cmat, 700, (m) => {
         m.geometry.setAttribute('aCarCol', new THREE.InstancedBufferAttribute(new Float32Array(700 * 3), 3));

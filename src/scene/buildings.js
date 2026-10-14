@@ -144,7 +144,7 @@ class GB {
 export class SignAtlas {
   constructor() {
     this.cols = 4;
-    this.rows = 32;
+    this.rows = 64;
     this.cw = 256;
     this.ch = 64;
     this.canvas = document.createElement('canvas');
@@ -184,13 +184,17 @@ export class SignAtlas {
     g.fillStyle = pal[1];
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    let size = 34;
-    g.font = `700 ${size}px "Barlow Condensed", "Arial Narrow", sans-serif`;
-    while (g.measureText(text).width > this.cw - 24 && size > 14) {
+    const lines = String(text).split('\n');
+    const maxSize = lines.length > 1 ? 27 : 34;
+    let size = maxSize;
+    const font = (z) => `700 ${z}px "Barlow Condensed", "Arial Narrow", sans-serif`;
+    g.font = font(size);
+    while (lines.some((l) => g.measureText(l).width > this.cw - 24) && size > 12) {
       size -= 2;
-      g.font = `700 ${size}px "Barlow Condensed", "Arial Narrow", sans-serif`;
+      g.font = font(size);
     }
-    g.fillText(text, x + this.cw / 2, y + this.ch / 2 + 2);
+    const lh = size * 1.02;
+    lines.forEach((l, i) => g.fillText(l, x + this.cw / 2, y + this.ch / 2 + 2 + (i - (lines.length - 1) / 2) * lh));
     this.texture.needsUpdate = true;
   }
 }

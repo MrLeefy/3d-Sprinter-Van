@@ -8,6 +8,7 @@ import { Walker } from './walk.js';
 import { addProps } from './props.js';
 import { Land } from './land.js';
 import { Effects } from './effects.js';
+import { Traffic, Wildlife } from './life.js';
 import { World as GenWorld } from '../world/gen.js';
 import { Driver } from './drive.js';
 import { buildBody } from './vanBody.js';
@@ -68,6 +69,9 @@ export class World {
     this.land = this.terrain;
     this.driver = new Driver(this);
     this.fx = new Effects(this);
+    this.traffic = new Traffic(this.terrain, this, this.stage);
+    this.wildlife = new Wildlife(this.terrain, this, this.stage);
+    this.setQuality(this.stage.quality || 'high');
     this.ir = new Infrared(this);
     this.modes.infrared = this.ir;
     this.walker = new Walker(this);
@@ -76,6 +80,14 @@ export class World {
     this.camTween = null;
     this.uaCache = envelopeUA({ covers: 0 });
     this.sunDir = new THREE.Vector3(0, 1, 0);
+  }
+
+  /** Quality tier for the stage and everything streamed around the van. */
+  setQuality(tier) {
+    this.stage.setQuality(tier);
+    this.terrain.setQuality(tier);
+    this.traffic?.setQuality(tier);
+    this.wildlife?.setQuality(tier);
   }
 
   rigBody() {
@@ -211,6 +223,8 @@ export class World {
     this.terrain.tick(dt);
     this.driver.update(dt);
     this.fx.update(dt, this.driver);
+    this.traffic.update(dt, this.driver);
+    this.wildlife.update(dt, this.driver);
     this.sunDir.copy(this.stage.sunScene);
     const nightK = THREE.MathUtils.clamp((0.12 - this.sunDir.y) / 0.25, 0, 1);
     this.terrain.season.u.uNight.value = nightK; // town windows, signs and street lamps light up

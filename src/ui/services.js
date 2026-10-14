@@ -72,6 +72,17 @@ export class Services {
     return true;
   }
 
+  /** An unavoidable cost (never blocks; takes what the wallet has). */
+  penalty(v, why) {
+    const c = Math.min(v, this.cash);
+    if (c <= 0) return;
+    this.cash -= c;
+    this.stats.spent += c;
+    this.paint();
+    this.save();
+    this.app.toast(`-${money(c)} · ${why}`);
+  }
+
   earn(v, why) {
     this.cash += v;
     this.paint();

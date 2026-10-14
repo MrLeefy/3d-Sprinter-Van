@@ -617,8 +617,9 @@ export class Driver {
     if (Math.hypot(this.x - cc.x, this.z - cc.z) < 6 && cc.t > performance.now() - 400) return;
     const tw = this.world.terrain.towns;
     const near = tw ? tw.collidersNear(this.x, this.z, 46) : { rects: [], circles: [] };
+    const rs = this.world.terrain.roadside ? this.world.terrain.roadside.collidersNear(this.x, this.z, 46) : [];
     cc.rects = near.rects;
-    cc.circles = near.circles.concat(this.world.terrain.colliders.filter((o) => Math.abs(o.x - this.x) < 46 && Math.abs(o.z - this.z) < 46).map((o) => ({ x: o.x, z: o.z, r: o.r, kind: o.kind })));
+    cc.circles = near.circles.concat(rs).concat(this.world.terrain.colliders.filter((o) => Math.abs(o.x - this.x) < 46 && Math.abs(o.z - this.z) < 46).map((o) => ({ x: o.x, z: o.z, r: o.r, kind: o.kind })));
     cc.x = this.x;
     cc.z = this.z;
     cc.t = performance.now();

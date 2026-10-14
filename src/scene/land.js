@@ -6,6 +6,7 @@ import { SeasonState, SEASONS, SCENARIO_SEASON, SCENARIO_WET } from './season.js
 import { makeTerrainMaterial, makeRoadMaterial, makeWaterMaterial, RC } from './landMaterials.js';
 import * as VEG from './vegetation.js';
 import { Towns } from './towns.js';
+import { Roadside } from './roadside.js';
 import { prng, hash2, smoothstep } from '../world/noise.js';
 import { ROAD } from '../world/gen.js';
 
@@ -143,6 +144,7 @@ export class Land {
     this.bales = inst(VEG.bale(), this.vm.bale, 700);
     this.season.listeners.push(() => this.onSeason());
     this.towns = new Towns(this, world, stage);
+    this.roadside = new Roadside(this, world, stage, this.towns);
     this.applySeason();
     this.scatterDirty = false;
     this.pendingEdges = 0;
@@ -191,6 +193,7 @@ export class Land {
     this.fcenter = null;
     this.scatterDirty = true;
     this.towns?.setQuality?.(tier);
+    this.roadside?.setQuality(tier);
   }
 
   // ── Queries ────────────────────────────────────────────────────────────────
@@ -287,6 +290,7 @@ export class Land {
       this.rebuildScatter(ncx, ncz);
     }
     this.towns?.update(x, z, sync);
+    this.roadside?.update(x, z, sync);
   }
 
   /** Build everything now (used for screenshots and tests; the app streams progressively). */
@@ -294,9 +298,11 @@ export class Land {
     this.update(x, z, true);
     this.budgetOverride = Infinity;
     if (this.towns) this.towns.budgetOverride = Infinity;
+    if (this.roadside) this.roadside.budgetOverride = Infinity;
     this.update(x, z);
     this.budgetOverride = null;
     if (this.towns) this.towns.budgetOverride = null;
+    if (this.roadside) this.roadside.budgetOverride = null;
   }
 
   // ── Terrain chunks ─────────────────────────────────────────────────────────
@@ -592,6 +598,7 @@ export class Land {
     for (const m of this.lakes.values()) m.material = mat || this.waterMat;
     this.scatter.visible = !mat;
     if (this.towns) this.towns.setMaterial?.(mat);
+    this.roadside?.setMaterial(mat);
   }
 
   tick(dt) {

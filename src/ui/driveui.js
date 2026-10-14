@@ -41,6 +41,7 @@ export class DriveUI {
     this.mapScreen = new MapScreen(this);
     this.services = new Services(this);
     this.passport = new Passport(this);
+    this.D.onSight = () => this.passport.sawAnimal();
     this.apply(true);
   }
 
@@ -248,13 +249,15 @@ export class DriveUI {
       tree: 'Bump — you hit a tree. Back up and steer around it.', boulder: 'Bump — boulder. Find another line.', building: 'Crunch — that is a building. Back up and go around.',
       deep: 'Too deep to ford: the van stops before the water reaches the sills (≈ 0.6 m).', slide: 'Sliding — not enough grip for that speed on this surface.',
       stuck: 'Wheelspin — this rear-wheel-drive van cannot climb that slope on this surface. Back down and take the track, or press T to get back on the road.',
-      reset: `Back on the road${this.D.road ? ` — ${this.D.road.edge.name}` : ''}.`, noRoad: 'No road within 1.4 km — try the map and drive toward a town.', cruiseLow: 'Cruise control needs a little speed first.', curve: 'Curve ahead — easing off the throttle.',
+      animal: 'Thump — you hit a wildlife. The van is dented but drivable; repairs cost cash. Slow down at dusk and watch the road edges.', crash: 'Crunch — you hit another vehicle. Keep your distance and use the horn.', reset: `Back on the road${this.D.road ? ` — ${this.D.road.edge.name}` : ''}.`, noRoad: 'No road within 1.4 km — try the map and drive toward a town.', cruiseLow: 'Cruise control needs a little speed first.', curve: 'Curve ahead — easing off the throttle.',
     }[kind];
     if (msg) A.toast(msg);
     if (this.s.haptics && navigator.vibrate) {
       if (kind === 'building' || kind === 'tree' || kind === 'boulder') navigator.vibrate([70, 30, 40]);
       else if (kind === 'slide') navigator.vibrate(25);
     }
+    if (kind === 'animal') this.services?.penalty(120, 'repairs');
+    if (kind === 'crash') this.services?.penalty(60, 'a fender-bender');
     this.modules.forEach((m) => m.onDriveEvent?.(kind));
   }
 

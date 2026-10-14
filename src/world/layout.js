@@ -167,6 +167,12 @@ function driveway(L, lot, rng, len, street = 1) {
   L.furn('mailbox', lot.x + lot.w * 0.18, mz, faceRot(0, f));
 }
 
+/** A row of 90-degree parking bays starting at (x0, zc) running east, with stripes and some cars. */
+function bayRow(L, rng, x0, zc, n, bw, bl, p) {
+  L.furn('bays', x0, zc, 0, n, bw, bl, (n * bw) / 2 + 2);
+  for (let i = 0; i < n; i++) if (rng() < p) L.car(x0 + (i + 0.5) * bw + (rng() - 0.5) * 0.3, zc + (rng() - 0.5) * 0.4, faceRot(0, rng() < 0.5 ? -1 : 1), carKind(rng));
+}
+
 /** Sidewalk strollers along one block edge: segments of 14–40 m walked back and forth. */
 function strollers(L, rng, x0, x1, zEdge, count) {
   for (let i = 0; i < count; i++) {
@@ -306,8 +312,7 @@ function fillBlockUrban(L, r, zone, rng, n, rho, big) {
     for (const sd of [-1, 1]) {
       const zc = cz + sd * (aisle / 2 + bl / 2);
       if (Math.abs(zc - cz) + bl / 2 > D / 2 - 1) continue;
-      L.furn('bays', x0, zc, faceRot(0, -sd), n, bw, bl, n * bw / 2 + 2);
-      for (let i = 0; i < n; i++) if (rng() < 0.55) L.car(x0 + (i + 0.5) * bw + (rng() - 0.5) * 0.3, zc + (rng() - 0.5) * 0.4, faceRot(0, rng() < 0.5 ? -sd : sd), carKind(rng));
+      bayRow(L, rng, x0, zc, n, bw, bl, 0.55);
     }
     for (let i = 0; i < 3; i++) L.prop('lamps', [x0 + (i + 0.5) * (n * bw) / 3, cz, i % 2 ? Math.PI / 2 : -Math.PI / 2]);
   } else if (zone === 'ranch') {
@@ -373,21 +378,52 @@ function urban(L, world, n) {
   const wtx = cx + side * Rp * 0.3, wtz = cz - Rz * 0.42;
   L.lot('watertower', wtx, wtz, 9, 9, { h: 30, r: 4.5, pal: 7 });
   rv(wtx, wtz, 9, 9);
+  const railZ = railM != null ? cz + railM * G.bz : null;
+  const avenueXs = [...hasV.keys()].map((k) => ({ x: cx + k * G.bx, w: wV(k) }));
   if (!big) {
-    const ex = cx - side * (Rp * 0.9 - 28);
-    L.lot('elevator', ex, cz + G.wMain / 2 + 26, 14, 16, { h: 36, pal: 0 });
-    L.lot('silo', ex + 12, cz + G.wMain / 2 + 22, 8, 8, { h: 22, r: 4, pal: 0 });
-    L.lot('silo', ex + 12, cz + G.wMain / 2 + 31, 8, 8, { h: 22, r: 4, pal: 0 });
-    L.lot('warehouse', ex - 22, cz + G.wMain / 2 + 24, 22, 12, { h: 8, pal: 9, roof: 'lowgable' });
-    rv(ex - 4, cz + G.wMain / 2 + 26, 60, 26);
+    // grain elevator complex on the railway (or just south of Main St when the town has no line)
+    const ex = cx + side * (Rp * 0.9 - 28);
+    const zE = railZ != null ? railZ - 16 : cz + G.wMain / 2 + 26;
+    L.lot('elevator', ex, zE, 14, 16, { h: 36, pal: 0 });
+    L.lot('silo', ex + 12, zE - 4, 8, 8, { h: 22, r: 4, pal: 0 });
+    L.lot('silo', ex + 12, zE + 5, 8, 8, { h: 22, r: 4, pal: 0 });
+    L.lot('warehouse', ex - 22, zE - 2, 22, 12, { h: 8, pal: 9, roof: 'lowgable' });
+    rv(ex - 12, zE, 84, 30);
+    if (railZ != null) {
+      L.lot('depot', ex - 46, railZ - wRail / 2 - 5.5, 16, 7, { floors: 1, h: 4.2, pal: 4, roof: 'hip', sign: `${n.name} Depot` });
+      L.furn('bench', ex - 46, railZ - wRail / 2 - 1.2, faceRot(0, 1), 0, 0, 0, 2);
+    }
+  }
+  if (railZ != null) {
+    // freight cars stored on the line, clear of every level crossing
+    const start = cx + side * (Rp * 0.9 - 28) - 60;
+    let carX = big ? cx + (hash2(n.i, n.j, 99) - 0.5) * Rp : start;
+    const cnt = 3 + Math.floor(rng() * 4);
+    for (let i = 0; i < cnt; i++, carX += 15) {
+      if (avenueXs.some((q) => Math.abs(q.x - carX) < q.w / 2 + 9)) continue;
+      L.lot('railcar', carX, railZ, 13.5, 3.1, { floors: 1, h: 4.1, pal: Math.floor(rng() * 4), extra: { car: Math.floor(rng() * 3) } });
+    }
+    for (const q of avenueXs) {
+      if (Math.abs(q.x - cx) > (hasH.get(railM) ?? 0) - 12) continue;
+      L.furn('xbuck', q.x + q.w / 2 + 1.8, railZ + wRail / 2 + 3, faceRot(0, 1), 0, 0, 0, 2);
+      L.furn('xbuck', q.x - q.w / 2 - 1.8, railZ - wRail / 2 - 3, faceRot(0, -1), 0, 0, 0, 2);
+    }
   }
   const gx = cx + side * (Rp * 0.8);
-  L.lot('canopy', gx, cz - G.wMain / 2 - 14, 22, 12, { h: 5.2, solid: false, pal: 7, extra: { pumps: 4 } });
+  const gz = cz - G.wMain / 2 - 14;
+  L.lot('canopy', gx, gz, 22, 12, { h: 5.2, solid: false, pal: 7, extra: { pumps: 4 } });
   L.lot('store', gx + side * 4, cz - G.wMain / 2 - 28, 15, 9, { floors: 1, fh: 3.6, pal: Math.floor(rng() * 8), roof: 'flat', sign: pick(rng, BUSINESSES) });
-  rv(gx + side * 4, cz - G.wMain / 2 - 20, 40, 36);
-  L.zone('fuel', gx, cz - G.wMain / 2 - 14, 12, { name: `${n.name} Fuel & Go`, diesel: true });
-  L.zone('water', gx + side * 14, cz - G.wMain / 2 - 14, 8, { name: 'Potable water fill' });
+  L.lot('diner', gx + side * 27, cz - G.wMain / 2 - 22, 18, 10, { floors: 1, h: 4, pal: 0, roof: 'flat', sign: pick(rng, ['Big Sky Diner', 'Hi-Line Diner', 'Prairie Table', 'Sunrise Cafe', 'Mile Marker Diner']) });
+  rv(gx + side * 12, cz - G.wMain / 2 - 20, 62, 36);
+  L.zone('fuel', gx, gz, 12, { name: `${n.name} Fuel & Go`, diesel: true });
+  L.zone('water', gx + side * 14, gz, 8, { name: 'Potable water fill' });
   L.zone('shop', gx + side * 4, cz - G.wMain / 2 - 22, 12, { name: pick(rng, ['Prairie Grocery', 'Trailhead Market', 'Elk Creek Mercantile', 'Big Sky Foods']) });
+  L.furn('pylon', gx - side * 14, cz - G.wMain / 2 - 3.2, faceRot(0, 1), 0, 0, 0, 2);
+  for (let i = 0; i < 4; i++) {
+    if (rng() < 0.45) continue; // cars at the pumps
+    L.car(gx - 11 + (22 * (i + 0.5)) / 4, gz + (rng() < 0.5 ? -2.9 : 2.9), rng() < 0.5 ? 0 : Math.PI, carKind(rng));
+  }
+  bayRow(L, rng, gx + side * 27 - 7.25, cz - G.wMain / 2 - 22 + 5 + 2.9, 5, 2.9, 5.4, 0.6);
   const hasRV = hash2(n.i, n.j, 92) < 0.75;
   const rvx = cx - side * (Rp * 0.82), rvz = cz + G.wMain / 2 + 36;
   if (hasRV) rv(rvx, rvz, 66, 40);

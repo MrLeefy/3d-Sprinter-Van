@@ -120,7 +120,7 @@ test('towns: intersections get signals or stop signs, crosswalks and the railway
     assert.ok(by('signal').length >= 4, `${n.name}: the Main St / Center Ave crossing is signalised`);
     // a rail line is a gravel street too, so avenues pass over it without a junction patch
     for (const r of L.rails) assert.ok(L.streets.some((s) => s.kind === 'gravel' && Math.abs(s.az - r[1]) < 1e-6), `${n.name} rail has a bed`);
-    for (const m of by('signal')) assert.ok(m[4] === 0 || m[4] === 1);
+    for (const m of by('signal')) assert.ok(m[4] === 0 || m[4] === 2);
   }
   assert.ok(signals > 20 && stops > 20 && cross > 40 && rails >= 2 && bays > 3, JSON.stringify({ signals, stops, cross, rails, bays }));
 });

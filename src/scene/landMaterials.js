@@ -44,9 +44,18 @@ export function makeTerrainMaterial(season) {
         vec3 dirtC = texture2D(tDirt, wp / 6.0).rgb;
         float sl = 1.0 - clamp(normalize(vON).y, 0.0, 1.0);
         float sband = fract(vWY * 0.19 + 0.55 * vn(wp / 70.0));
-        vec3 strata = mix(L3(vec3(0.55, 0.36, 0.26)), L3(vec3(0.80, 0.68, 0.50)), smoothstep(0.15, 0.55, sband)) * (0.7 + 0.5 * dot(dirtC, vec3(0.333)));
-        strata = mix(strata, L3(vec3(0.38, 0.27, 0.22)), smoothstep(0.82, 0.98, sband));
-        vec3 col = grass;
+        float fineBands = sin(vWY * 1.6 + vn(wp / 16.0) * 4.0) * 0.5 + 0.5;
+        vec3 sandstoneRed = L3(vec3(0.68, 0.31, 0.18));
+        vec3 sandstoneOchre = L3(vec3(0.82, 0.54, 0.28));
+        vec3 sandstoneBuff = L3(vec3(0.86, 0.74, 0.52));
+        vec3 ironStrata = L3(vec3(0.36, 0.18, 0.12));
+        vec3 strata = mix(sandstoneRed, sandstoneBuff, smoothstep(0.12, 0.52, sband)) * (0.7 + 0.5 * dot(dirtC, vec3(0.333)));
+        strata = mix(strata, sandstoneOchre, fineBands * 0.45);
+        strata = mix(strata, ironStrata, smoothstep(0.80, 0.96, sband));
+        float reedN = vn(wp / 8.0) * 0.65 + vn(wp / 2.4) * 0.35;
+        vec3 reedTint = mix(L3(vec3(0.44, 0.52, 0.20)), L3(vec3(0.60, 0.56, 0.24)), reedN);
+        float marshShore = clamp((1.0 - smoothstep(12.0, 52.0, vWY)) * (1.0 - vW.y) * (1.0 - vW.z) * (0.35 + 0.65 * vn(wp / 40.0)), 0.0, 1.0);
+        vec3 col = mix(grass, reedTint, marshShore * (0.5 + 0.5 * uWet));
         col = mix(col, forestC, smoothstep(0.38, 0.72, vW.x));
         col = mix(col, strata, vW.y);
         if (vW.w > 0.03) {

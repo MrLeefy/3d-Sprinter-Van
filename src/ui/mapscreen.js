@@ -6,8 +6,9 @@ import { KIND_LABEL, S } from '../world/gen.js';
 import { layoutOf } from '../world/layout.js';
 import { planRoute, bearing } from '../world/route.js';
 import { depotOf } from '../world/jobs.js';
+import { nearestCamp, BOONDOCK_TYPES } from '../world/camp.js';
 
-const ICON = { fuel: '⛽', water: '🚰', dump: '♻', camp: '⛺', shop: '🛒' };
+const ICON = { fuel: '⛽', water: '🚰', dump: '♻', camp: '⛺', shop: '🛒', boondock: '🌲' };
 const TURN_ICON = { left: '↰', right: '↱', straight: '↑', arrive: '⚑', depart: '↑', enter: '⌂' };
 
 export function fmtDistance(m, units) {
@@ -60,7 +61,7 @@ export class MapScreen {
     el.hidden = true;
     el.innerHTML = `
       <canvas id="msCanvas" aria-label="World map"></canvas>
-      <div class="ms-top"><b>Map</b><button class="dh-btn" id="msFuel">⛽ Nearest fuel</button><button class="dh-btn" id="msWater">🚰 Water</button><span class="ms-hint">Drag to pan · pinch or scroll to zoom · tap a town to navigate · tap empty ground for a waypoint</span><button class="dh-btn primary" id="msClose">Close · M</button></div>
+      <div class="ms-top"><b>Map</b><button class="dh-btn" id="msFuel">⛽ Nearest fuel</button><button class="dh-btn" id="msWater">🚰 Water</button><button class="dh-btn" id="msBoondock">🌲 Boondock</button><span class="ms-hint">Drag to pan · pinch or scroll to zoom · tap a town to navigate · tap empty ground for a waypoint</span><button class="dh-btn primary" id="msClose">Close · M</button></div>
       <div class="ms-ctl"><button id="msIn" aria-label="Zoom in">＋</button><button id="msOut" aria-label="Zoom out">−</button><button id="msVan" aria-label="Centre on the van">◎</button><button id="msHome" aria-label="Show the starting camp">⌂</button></div>
       <div class="ms-card" id="msCard" hidden></div>
       <div class="ms-legend"><span><i style="background:#fff"></i>Interstate</span><span><i style="background:#ffd966"></i>Highway</span><span><i style="background:#e8e8e8"></i>County</span><span><i style="background:#c9b48c"></i>Gravel</span><span><i style="background:#8f7552"></i>Track</span><span class="b"><i style="background:#3aa0ff"></i>Route</span></div>`;
@@ -86,6 +87,14 @@ export class MapScreen {
     });
     quick('#msFuel', 'fuel', 'fuel');
     quick('#msWater', 'water', 'water');
+    el.querySelector('#msBoondock').addEventListener('click', () => {
+      const c = nearestCamp(this.W, this.D.x, this.D.z, 25000);
+      if (!c) return this.app.toast('No boondocking spot found nearby.');
+      const bt = BOONDOCK_TYPES[c.category] || { icon: '🌲', label: 'Boondock' };
+      this.setWaypoint({ x: c.x, z: c.z, name: `${bt.icon} ${c.name}` });
+      this.app.toast(`${bt.icon} ${c.name} (${bt.label}) · ☀ ${Math.round(c.solarExposure * 100)}% solar · 🌬 ${Math.round(c.windShelter * 100)}% wind shelter · 📐 ${Math.round(c.levelness * 100)}% level`);
+      this.closeMap();
+    });
     el.querySelector('#msIn').addEventListener('click', () => this.zoom(0.6));
     el.querySelector('#msOut').addEventListener('click', () => this.zoom(1.67));
     el.querySelector('#msVan').addEventListener('click', () => this.centreOnVan());

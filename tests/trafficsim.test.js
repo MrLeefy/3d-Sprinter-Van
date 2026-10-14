@@ -163,3 +163,85 @@ test('traffic: a stopped line of cars is held at the junction until the crossing
   assert.ok(waited > 0, 'somebody had to wait');
   assert.equal(maxInZone, 0, 'no two crossing movements share the junction at once');
 });
+
+test('traffic: vehicles obey traffic signals and stop lines at signalized town intersections', () => {
+  const g = makeGame({ seed: 5 });
+  const town = findTown(g);
+  assert.ok(town);
+  quiet(g);
+  const pe = g.T.portEdge(town, 'E');
+  assert.ok(pe && pe.e);
+  const e = pe.e;
+  const startS = pe.start ? 60 : e.len - 60;
+  const dir = pe.start ? -1 : 1;
+  const car = spawnAI(g, e, startS, dir, 'sedan', 12, { lane: 0 });
+  // Set clock to red phase for axis X (t = 25s, red duration until 48s)
+  g.T.clock = 25;
+  g.D.place(town.x + 50, town.z, Math.PI);
+  g.D.v = 0;
+  for (let i = 0; i < 30 * 8; i++) {
+    tick(g, 1 / 30);
+    g.T.clock = 25;
+  }
+  assert.ok(car.v < 1.0, `car stopped on red light: v=${car.v}`);
+  assert.equal(car.e.conn, undefined, 'car did not enter junction while red');
+  assert.ok(car.signalPhase === 'red' || car.waitT > 0);
+
+  // Switch to green phase for axis X (t = 5s)
+  g.T.clock = 5;
+  for (let i = 0; i < 30 * 10; i++) {
+    tick(g, 1 / 30);
+    g.T.clock = 5;
+  }
+  assert.ok(car.v > 1.5 || car.e.conn || g.T.stats.transits > 0, 'car proceeded on green light');
+});
+
+test('traffic: directional turn signals activate 50m before junction turns', () => {
+  const g = makeGame({ seed: 5 });
+  const town = findTown(g);
+  quiet(g);
+  const pe = g.T.portEdge(town, 'W');
+  assert.ok(pe && pe.e);
+  const e = pe.e;
+  const startS = pe.start ? 120 : e.len - 120;
+  const dir = pe.start ? -1 : 1;
+  const car = spawnAI(g, e, startS, dir, 'sedan', 8, { lane: 0 });
+  g.T.planNext(car);
+  if (car.next && car.next.e && car.next.e.conn) {
+    car.next.e.turn = 'left';
+  }
+  g.D.place(town.x + 200, town.z, Math.PI);
+  g.D.v = 0;
+  let signaled = false;
+  for (let i = 0; i < 30 * 12; i++) {
+    tick(g, 1 / 30);
+    const toEnd = g.T.remain(car);
+    if (toEnd <= 50 && toEnd > 0 && car.signal === -1) {
+      signaled = true;
+      break;
+    }
+  }
+  assert.ok(signaled, 'turn signal was activated within 50m of turning connector');
+});
+
+test('traffic: non-emergency vehicles yield and move over when emergency vehicle approaches from behind', () => {
+  const g = makeGame();
+  const e = findEdge(g, 'interstate', 1500);
+  quiet(g);
+  // Civilian sedan in inner lane 0
+  const civilian = spawnAI(g, e, 300, 1, 'sedan', 18, { lane: 0 });
+  // Police interceptor in inner lane 0 approaching fast from behind
+  const police = spawnAI(g, e, 240, 1, 'police', 32, { lane: 0 });
+  g.D.place(e.xs[0], e.zs[0], 0);
+  g.D.v = 0;
+  let movedOverOrSlowed = false;
+  for (let i = 0; i < 30 * 6; i++) {
+    tick(g, 1 / 30);
+    if (civilian.signal === 1 || civilian.lane === 1 || civilian.mode === 'signal' || civilian.v < 15) {
+      movedOverOrSlowed = true;
+      break;
+    }
+  }
+  assert.ok(movedOverOrSlowed, 'civilian vehicle reacted to emergency vehicle approaching from behind');
+});
+

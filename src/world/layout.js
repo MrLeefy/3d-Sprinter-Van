@@ -542,7 +542,7 @@ function urban(L, world, n) {
       if (signalised) {
         const greenH = m === 0 ? true : k === 0 ? false : (k + m) % 2 === 0;
         for (const [sx, sz, rot, alongX] of [[1, 1, Math.PI, true], [1, -1, -Math.PI / 2, false], [-1, 1, Math.PI / 2, false], [-1, -1, 0, true]]) {
-          L.furn('signal', ix + sx * hx, iz + sz * hz, rot, alongX ? (greenH ? 0 : 1) : greenH ? 1 : 0, alongX ? 0 : -sx, alongX ? -sz : 0, 2);
+          L.furn('signal', ix + sx * hx, iz + sz * hz, rot, alongX ? (greenH ? 0 : 2) : greenH ? 2 : 0, alongX ? 0 : -sx, alongX ? -sz : 0, 2);
         }
       } else {
         const stopH = k === 0 || fourWay, stopV = (m === 0 && k !== 0) || fourWay;
@@ -848,3 +848,98 @@ export function layoutOf(world, n) {
   n._layout = L;
   return L;
 }
+
+/**
+ * Deterministic traffic signal cycle:
+ * Green: 20s, Yellow: 4s, Red: 24s. Total cycle: 48s.
+ * Queries phase state for an axis at time `time` at intersection `(ix, iz)` of `node`.
+ *
+ * @param {object} node - Settlement node
+ * @param {number} ix - Intersection x coordinate
+ * @param {number} iz - Intersection z coordinate
+ * @param {number} time - Simulation clock time in seconds
+ * @param {string|number|boolean} axis - 'X' / 'EW' / 0 / true for along-X; 'Z' / 'NS' / 1 / false for along-Z
+ * @returns {{ phase: 'green'|'yellow'|'red', code: 0|1|2, timeRemaining: number, cycle: number }}
+ */
+export function trafficSignalPhase(node, ix, iz, time = 0, axis = 'X') {
+  const cycle = 48;
+  const isEastWest = (
+    axis === 0 ||
+    axis === true ||
+    axis === '0' ||
+    axis === 'X' ||
+    axis === 'x' ||
+    axis === 'EW' ||
+    axis === 'alongX' ||
+    axis === 'E' ||
+    axis === 'W'
+  );
+
+  const cx = node ? (node.x || 0) : 0;
+  const cz = node ? (node.z || 0) : 0;
+  const k = Math.round((ix - cx) / 80);
+  const m = Math.round((iz - cz) / 64);
+  const seed = (node?.seed || (node ? hash2(node.i || 0, node.j || 0, 99) : 0));
+  const offset = hash2(k, m, seed + 107) * cycle;
+
+  const tLocal = ((time + offset) % cycle + cycle) % cycle;
+
+  let phase;
+  let code;
+  let timeRemaining;
+
+  if (isEastWest) {
+    if (tLocal < 20) {
+      phase = 'green';
+      code = 0;
+      timeRemaining = 20 - tLocal;
+    } else if (tLocal < 24) {
+      phase = 'yellow';
+      code = 1;
+      timeRemaining = 24 - tLocal;
+    } else {
+      phase = 'red';
+      code = 2;
+      timeRemaining = 48 - tLocal;
+    }
+  } else {
+    if (tLocal < 24) {
+      phase = 'red';
+      code = 2;
+      timeRemaining = 24 - tLocal;
+    } else if (tLocal < 44) {
+      phase = 'green';
+      code = 0;
+      timeRemaining = 44 - tLocal;
+    } else {
+      phase = 'yellow';
+      code = 1;
+      timeRemaining = 48 - tLocal;
+    }
+  }
+
+  return {
+    phase,
+    code,
+    timeRemaining: Math.round(timeRemaining * 100) / 100,
+    remaining: Math.round(timeRemaining * 100) / 100,
+    cycle,
+  };
+}
+
+/**
+ * Returns all signalized intersection phases in a settlement node at a given time.
+ * @param {object} node
+ * @param {number} time
+ * @returns {Array<{ ix, iz, axisX: object, axisZ: object }>}
+ */
+export function intersectionSignals(node, time = 0) {
+  if (!node) return [];
+  const signals = [];
+  const cx = node.x || 0, cz = node.z || 0;
+  const centerPhaseX = trafficSignalPhase(node, cx, cz, time, 'X');
+  const centerPhaseZ = trafficSignalPhase(node, cx, cz, time, 'Z');
+  signals.push({ ix: cx, iz: cz, axisX: centerPhaseX, axisZ: centerPhaseZ });
+  return signals;
+}
+

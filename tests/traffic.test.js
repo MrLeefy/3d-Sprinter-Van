@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   KINDS, driverParams, idmAccel, approachLimit, polylineCurvature, curveSpeedAhead, straightFor, mergeSafe, wantsToPass, passManeuver,
   oncomingClear, laneDecision, stepTrailer, makeHonk, honkStep, collide1D, impactDamage, laneLats, pickWeighted, SPAWN_MIX, SEMI_KING_TO_AXLE,
+  weatherSpeedFactor,
 } from '../src/sim/traffic.js';
 
 const car = driverParams('sedan');
@@ -210,3 +211,87 @@ test('lane decision: straight check is asked for the whole maneuver distance', (
   assert.ok(asked > 200, `asked ${asked}`);
   assert.equal(laneDecision({ ...c, heavy: true }), 'none', 'trucks stay put on two-lane roads behind a moving leader');
 });
+
+test('KINDS: emergency and service fleet contains police, ambulance, tow with valid metadata', () => {
+  for (const name of ['police', 'ambulance', 'tow']) {
+    const k = KINDS[name];
+    assert.ok(k, `kind ${name} exists`);
+    assert.equal(k.isEmergency, true, `${name} has isEmergency=true`);
+    assert.equal(k.emergencyType, name);
+    assert.ok(k.mass > 1000 && k.mass < 30000);
+    assert.ok(k.len > 4 && k.len < 10);
+    assert.ok(k.w > 1.7 && k.w < 2.6);
+    assert.ok(k.front > 2 && k.rear > 2);
+    assert.ok(k.a > 0.5 && k.b > 1.0);
+    assert.ok(k.circles && k.circles.length >= 3);
+  }
+  // Verify hatch collision circles continuous overlap
+  const hc = KINDS.hatch.circles;
+  assert.ok(hc.length >= 3, 'hatch has at least 3 circles');
+  for (let i = 0; i < hc.length - 1; i++) {
+    const dist = Math.abs(hc[i + 1][0] - hc[i][0]);
+    const rSum = hc[i + 1][1] + hc[i][1];
+    assert.ok(dist <= rSum, `no gap between circle ${i} and ${i + 1}: dist=${dist} rSum=${rSum}`);
+  }
+});
+
+test('weather: weatherSpeedFactor scales speeds down by -15% rain, -35% snow, -60% ice', () => {
+  // String queries
+  assert.equal(weatherSpeedFactor('rain'), 0.85);
+  assert.equal(weatherSpeedFactor('snow'), 0.65);
+  assert.equal(weatherSpeedFactor('winter'), 0.65);
+  assert.equal(weatherSpeedFactor('ice'), 0.40);
+  assert.equal(weatherSpeedFactor('summer'), 1.0);
+
+  // Surface key queries
+  assert.equal(weatherSpeedFactor(null, 'highway', 'wet'), 0.85);
+  assert.equal(weatherSpeedFactor(null, 'highway', 'plowed'), 0.65);
+  assert.equal(weatherSpeedFactor(null, 'highway', 'packed'), 0.65);
+  assert.equal(weatherSpeedFactor(null, 'highway', 'ice'), 0.40);
+
+  // SeasonState objects
+  const rainState = { u: { uWet: { value: 1.0 }, uIce: { value: 0 } }, key: 'rain' };
+  assert.equal(weatherSpeedFactor(rainState), 0.85);
+
+  const winterState = { u: { uWet: { value: 0 }, uIce: { value: 0 } }, key: 'winter', snowy: true };
+  assert.equal(weatherSpeedFactor(winterState), 0.65);
+
+  const iceState = { u: { uWet: { value: 0 }, uIce: { value: 0.8 } }, key: 'winter' };
+  assert.equal(weatherSpeedFactor(iceState), 0.40);
+});
+
+test('curves: curveSpeedAhead scales lateral acceleration by road surface friction mu / 1.05', () => {
+  const R = 100, step = 8, n = 60;
+  const xs = [], zs = [];
+  for (let k = 0; k < n; k++) {
+    const a = (k * step) / R;
+    xs.push(R * Math.sin(a));
+    zs.push(R * (1 - Math.cos(a)));
+  }
+  const cv = polylineCurvature(xs, zs, n, step);
+  const dry = curveSpeedAhead(cv, step, 10 * step, 1, 200, 2.8, 1.6, 6, 1.05);
+  const wet = curveSpeedAhead(cv, step, 10 * step, 1, 200, 2.8, 1.6, 6, 0.819);
+  const snow = curveSpeedAhead(cv, step, 10 * step, 1, 200, 2.8, 1.6, 6, 0.5);
+  const ice = curveSpeedAhead(cv, step, 10 * step, 1, 200, 2.8, 1.6, 6, 0.12);
+
+  assert.ok(wet < dry, `wet (${wet}) should be slower than dry (${dry})`);
+  assert.ok(snow < wet, `snow (${snow}) should be slower than wet (${wet})`);
+  assert.ok(ice < snow, `ice (${ice}) should be slower than snow (${snow})`);
+  // On dry tarmac vs ice: ratio of speeds approaches sqrt(0.12 / 1.05) ≈ 0.338
+  assert.ok(ice / dry < 0.6, `ice speed ratio: ${ice / dry}`);
+});
+
+test('idm: extends time headway T and increases following distance on wet, snow, and ice', () => {
+  const p = driverParams('sedan');
+  const v = 25, v0 = 28, gap = 45, vLead = 24;
+  const aDry = idmAccel(p, v, gap, vLead, v0, 1.05);
+  const aWet = idmAccel(p, v, gap, vLead, v0, 0.819);
+  const aSnow = idmAccel(p, v, gap, vLead, v0, 0.5);
+  const aIce = idmAccel(p, v, gap, vLead, v0, 0.12);
+
+  // Lower mu induces more braking (lower / more negative acceleration) at same gap
+  assert.ok(aWet < aDry, `aWet (${aWet}) < aDry (${aDry})`);
+  assert.ok(aSnow < aWet, `aSnow (${aSnow}) < aWet (${aWet})`);
+  assert.ok(aIce < aSnow, `aIce (${aIce}) < aSnow (${aSnow})`);
+});
+

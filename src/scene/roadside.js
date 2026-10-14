@@ -8,7 +8,7 @@ import { poisOf, POI_TYPES } from '../world/poi.js';
 import { hash2, hashStr } from '../world/noise.js';
 import { SLOGANS } from '../world/names.js';
 import { limitMph, mileMarkers, mileAt, advanceSigns, wildlifeSigns, guardSpans, exitLabel } from '../world/highway.js';
-import { lin, WOOD, DARK, STEEL, STONE, obox, wire, board, makeCtx, guardrail, delineators, gantry, overpass, restArea, weighStation, runawayRamp, farmstead } from './roadprops.js';
+import { lin, WOOD, DARK, STEEL, STONE, obox, wire, board, makeCtx, guardrail, delineators, gantry, overpass, bridgeStructure, culvertStructure, restArea, weighStation, runawayRamp, farmstead } from './roadprops.js';
 
 const BLOCK = 240;
 const POLE = 55;
@@ -94,6 +94,49 @@ function poiProp(gb, p, y, yaw) {
       for (const [u, d] of [[-3.8, -2.4], [3.8, -2.4], [-3.8, 2.4], [3.8, 2.4]]) at(u, -5 + d, 0, 2.6, 0.15, 0.15, WOOD);
       at(0, -5, 0.7, 0.8, 1.6, 0.5, WOOD, WOOD);
       at(0, -5, 0, 0.7, 0.15, 0.4, WOOD);
+      break;
+    case 'canyon_overlook':
+      for (let i = -4; i <= 4; i++) at(i * 1.4, -4.5, 0, 1.0, 0.55, 0.45, STONE, STONE);
+      at(0, -3.2, 0, 0.15, 3.6, 2.2, lin([0.5, 0.48, 0.45]), lin([0.5, 0.48, 0.45]));
+      at(0, -4.0, 0.8, 1.3, 0.08, 0.08, STEEL);
+      at(0, -4.0, 1.3, 1.45, 0.35, 0.1, STEEL);
+      at(2.4, -1.8, 0, 0.5, 1.1, 0.25, WOOD, WOOD);
+      break;
+    case 'mountain_pass':
+      at(0, -2.5, 0, 0.8, 1.8, 0.9, STONE, STONE);
+      for (const u of [-1.3, 1.3]) at(u, -2.5, 0.8, 3.2, 0.14, 0.14, WOOD, WOOD);
+      at(0, -2.5, 2.0, 3.1, 1.4, 0.1, lin([0.35, 0.25, 0.15]), lin([0.35, 0.25, 0.15]));
+      for (let i = 0; i < 4; i++) at(3.2, -3.0, i * 0.4, (i + 1) * 0.4, 0.9 - i * 0.18, 0.9 - i * 0.18, STONE, STONE);
+      at(-2.5, -2.5, 0, 0.5, 1.1, 0.25, WOOD, WOOD);
+      break;
+    case 'fire_tower':
+      for (const [u, d] of [[-2.4, -2.4], [2.4, -2.4], [-2.4, 2.4], [2.4, 2.4]]) at(u, -10 + d, 0, 12, 0.16, 0.16, WOOD, WOOD);
+      for (const lvl of [3.5, 7.0, 10.5]) {
+        for (const [u, d] of [[0, -2.4], [0, 2.4]]) at(u, -10 + d, lvl, lvl + 0.15, 2.4, 0.08, WOOD);
+        for (const [u, d] of [[-2.4, 0], [2.4, 0]]) at(u, -10 + d, lvl, lvl + 0.15, 0.08, 2.4, WOOD);
+      }
+      at(0, -10, 12.0, 14.6, 2.7, 2.7, lin([0.45, 0.3, 0.18]));
+      at(0, -10, 13.0, 14.2, 2.75, 2.75, lin([0.7, 0.85, 0.9]));
+      at(0, -10, 14.6, 15.5, 3.2, 3.2, lin([0.25, 0.2, 0.18]), lin([0.25, 0.2, 0.18]));
+      at(0, -10, 12.0, 12.1, 3.4, 3.4, WOOD, WOOD);
+      break;
+    case 'hoodoo_vista':
+      at(3.5, -8, 0, 7.5, 1.3, 1.3, lin([0.72, 0.45, 0.28]), lin([0.65, 0.38, 0.24]));
+      at(3.5, -8, 7.5, 8.6, 1.9, 1.9, lin([0.42, 0.32, 0.25]), lin([0.42, 0.32, 0.25]));
+      at(-3.8, -9, 0, 5.2, 1.1, 1.1, lin([0.75, 0.48, 0.3]));
+      at(-3.8, -9, 5.2, 6.0, 1.5, 1.5, lin([0.45, 0.35, 0.26]));
+      at(0, -3.5, 0, 0.6, 1.2, 0.3, WOOD, WOOD);
+      break;
+    case 'boondock':
+    case 'boondock_spot':
+      at(0, -7, 0, 0.08, 4.4, 3.0, lin([0.55, 0.5, 0.42]), lin([0.55, 0.5, 0.42]));
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        at(Math.cos(a) * 0.9, -7 + Math.sin(a) * 0.9, 0, 0.35, 0.22, 0.22, STONE, STONE);
+      }
+      at(0, -8.6, 0.35, 0.5, 1.3, 0.22, WOOD, WOOD);
+      at(1.6, -7.0, 0, 0.45, 0.3, 0.3, WOOD, WOOD);
+      at(-3.2, -4.5, 0, 1.4, 0.35, 0.08, WOOD, WOOD);
       break;
     default:
   }
@@ -373,6 +416,14 @@ export class Roadside {
     }
     if (big) delineators(ctx, s0, s1, railSpans);
     for (const ov of e.overpasses) if (ov.s >= s0 && ov.s < s1) overpass(ctx, ov);
+    if (e.bridges) {
+      for (const br of e.bridges) {
+        if (br.s1 > s0 && br.s0 < s1) {
+          if (br.kind === 'bridge') bridgeStructure(ctx, br);
+          else if (br.kind === 'culvert') culvertStructure(ctx, br);
+        }
+      }
+    }
     for (const lot of e.lots) {
       const sc = (lot.s0 + lot.s1) / 2;
       if (sc < s0 || sc >= s1) continue;

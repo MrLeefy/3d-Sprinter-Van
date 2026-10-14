@@ -222,6 +222,153 @@ export function overpass(ctx, ov) {
   }
 }
 
+/**
+ * Procedural 3D bridge deck with asphalt surface, guardrails, and vertical piers/bents extending to ground.
+ */
+export function bridgeStructure(ctx, br) {
+  const { gb, W, hw } = ctx;
+  const s0 = br.s0, s1 = br.s1;
+  const spanLen = s1 - s0;
+  if (spanLen <= 0) return;
+
+  const segL = 6.0;
+  const nSeg = Math.max(1, Math.ceil(spanLen / segL));
+  const ds = spanLen / nSeg;
+
+  const halfDeckW = hw + 0.6;
+  const deckThick = 0.95;
+
+  let prev = null;
+  for (let j = 0; j <= nSeg; j++) {
+    const s = s0 + j * ds;
+    const F = ctx.frame(s);
+    const y = F.y;
+    const l = F.xz(0, -halfDeckW);
+    const r = F.xz(0, halfDeckW);
+    const cur = { F, s, y, l, r };
+
+    if (prev) {
+      const pY = prev.y, cY = cur.y;
+      gb.quad(
+        [prev.l[0], pY + 0.02, prev.l[1]],
+        [prev.r[0], pY + 0.02, prev.r[1]],
+        [cur.r[0], cY + 0.02, cur.r[1]],
+        [cur.l[0], cY + 0.02, cur.l[1]],
+        [0, 1, 0],
+        ASPHALT,
+        K.plain,
+        8
+      );
+      gb.quad(
+        [cur.l[0], cY - deckThick, cur.l[1]],
+        [cur.r[0], cY - deckThick, cur.r[1]],
+        [prev.r[0], pY - deckThick, prev.r[1]],
+        [prev.l[0], pY - deckThick, prev.l[1]],
+        [0, -1, 0],
+        CONCRETE,
+        K.plain,
+        8
+      );
+      const nL = [-Math.cos(cur.F.yaw), 0, Math.sin(cur.F.yaw)];
+      gb.quad(
+        [prev.l[0], pY - deckThick, prev.l[1]],
+        [cur.l[0], cY - deckThick, cur.l[1]],
+        [cur.l[0], cY + 0.02, cur.l[1]],
+        [prev.l[0], pY + 0.02, prev.l[1]],
+        nL,
+        CONCRETE,
+        K.plain,
+        8
+      );
+      const nR = [Math.cos(cur.F.yaw), 0, -Math.sin(cur.F.yaw)];
+      gb.quad(
+        [cur.r[0], cY - deckThick, cur.r[1]],
+        [prev.r[0], pY - deckThick, prev.r[1]],
+        [prev.r[0], pY + 0.02, prev.r[1]],
+        [cur.r[0], cY + 0.02, cur.r[1]],
+        nR,
+        CONCRETE,
+        K.plain,
+        8
+      );
+
+      const midY = (pY + cY) / 2;
+      const midYaw = cur.F.yaw;
+      for (const side of [-1, 1]) {
+        const [px, pz] = cur.F.xz(-ds / 2, side * (halfDeckW - 0.15));
+        obox(gb, px, pz, midY, midY + 0.95, ds / 2 + 0.05, 0.16, midYaw, CONCRETE, K.plain, 8, CONCRETE, K.plain);
+        obox(gb, px, pz, midY + 0.92, midY + 1.05, ds / 2 + 0.05, 0.06, midYaw, STEEL, K.plain, 8);
+      }
+    }
+    prev = cur;
+  }
+
+  const pierSpacing = 22.0;
+  const numPiers = Math.max(1, Math.floor(spanLen / pierSpacing));
+  const pierStep = spanLen / (numPiers + 1);
+
+  for (let p = 1; p <= numPiers; p++) {
+    const sPier = s0 + p * pierStep;
+    const F = ctx.frame(sPier);
+    const deckBottom = F.y - deckThick;
+    const acrossYaw = F.yaw + Math.PI / 2;
+
+    obox(gb, F.x, F.z, deckBottom - 0.7, deckBottom, halfDeckW - 0.5, 0.65, acrossYaw, CONCRETE, K.plain, 8, CONCRETE);
+
+    const colOffsets = halfDeckW > 6.0 ? [-halfDeckW * 0.45, halfDeckW * 0.45] : [0];
+    for (const dCol of colOffsets) {
+      const [colX, colZ] = F.xz(0, dCol);
+      const groundY = W.baseHeight(colX, colZ);
+      const colHeight = deckBottom - 0.7 - groundY;
+      if (colHeight > 0.5) {
+        obox(gb, colX, colZ, groundY - 0.4, deckBottom - 0.7, 0.65, 0.65, F.yaw, CONCRETE, K.plain, 8);
+        obox(gb, colX, colZ, groundY - 0.5, groundY + 0.4, 0.95, 0.95, F.yaw, CONCRETE, K.plain, 8);
+        ctx.hit(colX, colZ, 1.2, 'boulder');
+      }
+    }
+  }
+
+  for (const sAbut of [s0, s1]) {
+    const F = ctx.frame(sAbut);
+    const g = W.baseHeight(F.x, F.z);
+    obox(gb, F.x, F.z, Math.min(g, F.y - deckThick) - 0.6, F.y, halfDeckW + 0.2, 0.9, F.yaw + Math.PI / 2, CONCRETE, K.plain, 8, CONCRETE);
+  }
+}
+
+/**
+ * Procedural culvert headwalls with corrugated drainage pipes.
+ */
+export function culvertStructure(ctx, br) {
+  const { gb, W, hw } = ctx;
+  const midS = (br.s0 + br.s1) / 2;
+  const F = ctx.frame(midS);
+  const roadY = F.y;
+  const pipeR = 0.65;
+  const headW = 3.6;
+
+  for (const side of [-1, 1]) {
+    const embankmentDist = side * (hw + 3.8);
+    const [hx, hz] = F.xz(0, embankmentDist);
+    const g = W.baseHeight(hx, hz);
+    const headTop = Math.min(roadY - 0.4, g + 2.2);
+    const headBottom = g - 0.4;
+    if (headTop <= headBottom) continue;
+
+    obox(gb, hx, hz, headBottom, headTop, headW / 2, 0.35, F.yaw, CONCRETE, K.plain, 8, CONCRETE);
+
+    for (const end of [-1, 1]) {
+      const [wx, wz] = F.xz(end * (headW / 2 + 0.8), embankmentDist - side * 0.8);
+      const wingYaw = F.yaw + (side > 0 ? end * 0.55 : -end * 0.55);
+      obox(gb, wx, wz, headBottom, headTop * 0.85 + headBottom * 0.15, 0.9, 0.22, wingYaw, CONCRETE, K.plain, 8);
+    }
+
+    const [px, pz] = F.xz(0, embankmentDist + side * 0.1);
+    const pipeY = g + pipeR + 0.1;
+    obox(gb, px, pz, pipeY - pipeR - 0.1, pipeY + pipeR + 0.1, pipeR + 0.15, 0.15, F.yaw, lin([0.38, 0.38, 0.4]), K.metal, 7);
+    obox(gb, px, pz, pipeY - pipeR, pipeY + pipeR, pipeR, 0.25, F.yaw, DARK, K.plain, 7);
+  }
+}
+
 // ── Rest area, weigh station, runaway ramp ──────────────────────────────────────
 
 function lightPole(ctx, x, z, yaw, y) {

@@ -32,6 +32,7 @@ export class VB {
     this.B = [];
     this.G = [];
     this.D = [];
+    this.DMG = [];
     this.I = [];
   }
 
@@ -39,13 +40,14 @@ export class VB {
     return this.P.length / 3;
   }
 
-  /** Append a geometry under matrix m. o: { col, kind, body, glow, uv:[u0,v0,u1,v1] } */
+  /** Append a geometry under matrix m. o: { col, kind, body, glow, uv:[u0,v0,u1,v1], damage:[front,rear,left,right] } */
   geo(g, m, o = {}) {
     const pos = g.attributes.position, nor = g.attributes.normal, uv = g.attributes.uv;
     const base = this.count;
     _n3.getNormalMatrix(m);
     const col = o.col || COL.dark, kind = o.kind ?? KIND.PAINT, body = o.body ? 1 : 0, glow = o.glow || 0;
     const r = o.uv || [0, 0, 1, 1];
+    const dmg = o.damage || [0, 0, 0, 0];
     for (let i = 0; i < pos.count; i++) {
       _v.fromBufferAttribute(pos, i).applyMatrix4(m);
       _nv.fromBufferAttribute(nor, i).applyMatrix3(_n3).normalize();
@@ -55,6 +57,7 @@ export class VB {
       this.K.push(kind);
       this.B.push(body);
       this.G.push(glow);
+      this.DMG.push(dmg[0], dmg[1], dmg[2], dmg[3]);
       if (uv && kind !== KIND.RIB) this.D.push(r[0] + (r[2] - r[0]) * uv.getX(i), r[1] + (r[3] - r[1]) * uv.getY(i));
       else this.D.push(_v.x, _v.y);
     }
@@ -117,6 +120,7 @@ export class VB {
     g.setAttribute('aBody', new THREE.Float32BufferAttribute(this.B, 1));
     g.setAttribute('aGlow', new THREE.Float32BufferAttribute(this.G, 1));
     g.setAttribute('aDecal', new THREE.Float32BufferAttribute(this.D, 2));
+    g.setAttribute('aDamage', new THREE.Float32BufferAttribute(this.DMG && this.DMG.length === this.count * 4 ? this.DMG : new Float32Array(this.count * 4), 4));
     g.setIndex(this.I);
     g.computeBoundingSphere();
     return g;
@@ -212,25 +216,89 @@ export function vehicleMaterial(season, atlas = null) {
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.2, envMapIntensity: 1.1 });
   const uTint = { value: new THREE.Color(1, 1, 1) };
   const uLamp = { value: new THREE.Vector4(0, 0.25, 0, 0) };
-  mat.userData = { uTint, uLamp };
+  const uLampExtra = { value: new THREE.Vector4(0, 0, 0, 0) }; // x: reverse, y: strobeBlue, z: strobeRed, w: strobeAmber
+  const uDamage = { value: new THREE.Vector4(0, 0, 0, 0) }; // front, rear, left, right (0..1)
+  mat.userData = {
+    uTint,
+    uLamp,
+    uLampExtra,
+    uDamage,
+    setReverse(on) {
+      uLampExtra.value.x = on ? 1.0 : 0.0;
+    },
+    setEmergency(blue, red, amber = 0) {
+      uLampExtra.value.y = Number.isFinite(blue) ? blue : 0;
+      uLampExtra.value.z = Number.isFinite(red) ? red : 0;
+      uLampExtra.value.w = Number.isFinite(amber) ? amber : 0;
+    },
+    setDamage(front = 0, rear = 0, left = 0, right = 0) {
+      uDamage.value.set(
+        Number.isFinite(front) ? Math.max(0, Math.min(1, front)) : 0,
+        Number.isFinite(rear) ? Math.max(0, Math.min(1, rear)) : 0,
+        Number.isFinite(left) ? Math.max(0, Math.min(1, left)) : 0,
+        Number.isFinite(right) ? Math.max(0, Math.min(1, right)) : 0,
+      );
+    },
+    updateLighting(v, gear = 'D', isEmergency = false, clock = 0) {
+      const isRev = v < -0.1 || gear === 'R' || gear === -1;
+      uLampExtra.value.x = isRev ? 1.0 : 0.0;
+      if (isEmergency) {
+        const ph = (Math.floor(clock * 8) % 2 === 0) ? 1.0 : 0.0;
+        uLampExtra.value.y = ph;
+        uLampExtra.value.z = 1.0 - ph;
+        uLampExtra.value.w = ph;
+      }
+    },
+  };
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTint = uTint;
     sh.uniforms.uLamp = uLamp;
+    sh.uniforms.uLampExtra = uLampExtra;
+    sh.uniforms.uDamage = uDamage;
     sh.uniforms.uNight = season.u.uNight;
     sh.uniforms.uWet = season.u.uWet;
     sh.uniforms.tDecal = { value: atlas?.texture ?? null };
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aKind;\nattribute float aBody;\nattribute float aGlow;\nattribute vec2 aDecal;\nuniform vec3 uTint;\nvarying float vKind;\nvarying float vGlow;\nvarying vec2 vDecal;\nvarying vec3 vTint;\nvarying vec3 vOP;')
+      .replace('#include <common>', '#include <common>\nattribute float aKind;\nattribute float aBody;\nattribute float aGlow;\nattribute vec2 aDecal;\nattribute vec4 aDamage;\nuniform vec3 uTint;\nuniform vec4 uDamage;\nvarying float vKind;\nvarying float vGlow;\nvarying vec2 vDecal;\nvarying vec3 vTint;\nvarying vec3 vOP;')
       .replace('#include <color_vertex>', `#include <color_vertex>
         vKind = aKind; vGlow = aGlow; vDecal = aDecal; vOP = position;
         #ifdef USE_INSTANCING_COLOR
           vTint = mix(vec3(1.0), instanceColor.xyz, aBody);
         #else
           vTint = mix(vec3(1.0), uTint, aBody);
-        #endif`);
+        #endif`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vec4 dmg = clamp(aDamage + uDamage, 0.0, 1.0);
+        if (max(max(dmg.x, dmg.y), max(dmg.z, dmg.w)) > 0.001) {
+          if (dmg.x > 0.001 && position.x > 0.3) {
+            float f = clamp((position.x - 0.3) / 2.2, 0.0, 1.0);
+            transformed.x -= dmg.x * f * 0.35;
+            transformed.y += sin(position.x * 20.0 + position.z * 5.0) * dmg.x * f * 0.045;
+            transformed.z += cos(position.x * 16.0 + position.y * 7.0) * dmg.x * f * 0.045;
+          }
+          if (dmg.y > 0.001 && position.x < -0.3) {
+            float f = clamp((-position.x - 0.3) / 2.2, 0.0, 1.0);
+            transformed.x += dmg.y * f * 0.35;
+            transformed.y += sin(-position.x * 20.0 + position.z * 5.0) * dmg.y * f * 0.045;
+            transformed.z += cos(-position.x * 16.0 + position.y * 7.0) * dmg.y * f * 0.045;
+          }
+          if (dmg.z > 0.001 && position.z < -0.3) {
+            float f = clamp((-position.z - 0.3) / 0.8, 0.0, 1.0);
+            transformed.z += dmg.z * f * 0.22;
+            transformed.y += sin(position.z * 22.0 + position.x * 6.0) * dmg.z * f * 0.035;
+            transformed.x += cos(position.z * 18.0 + position.y * 6.0) * dmg.z * f * 0.035;
+          }
+          if (dmg.w > 0.001 && position.z > 0.3) {
+            float f = clamp((position.z - 0.3) / 0.8, 0.0, 1.0);
+            transformed.z -= dmg.w * f * 0.22;
+            transformed.y += sin(position.z * 22.0 + position.x * 6.0) * dmg.w * f * 0.035;
+            transformed.x += cos(position.z * 18.0 + position.y * 6.0) * dmg.w * f * 0.035;
+          }
+        }`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform vec4 uLamp;
+        uniform vec4 uLampExtra;
         uniform float uNight;
         uniform float uWet;
         uniform sampler2D tDecal;
@@ -263,8 +331,17 @@ export function vehicleMaterial(season, atlas = null) {
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = vmt;')
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         if (vGlow > 0.5) {
-          vec3 lc = vGlow > 2.5 ? vec3(1.0, 0.55, 0.1) : (vGlow > 1.5 ? vec3(1.0, 0.04, 0.02) : vec3(1.0, 0.93, 0.78));
+          vec3 lc = vGlow > 5.5 ? vec3(0.95, 0.98, 1.0) : (vGlow > 4.5 ? vec3(1.0, 0.03, 0.02) : (vGlow > 3.5 ? vec3(0.05, 0.35, 1.0) : (vGlow > 2.5 ? vec3(1.0, 0.55, 0.08) : (vGlow > 1.5 ? vec3(1.0, 0.04, 0.02) : vec3(1.0, 0.93, 0.78)))));
           float lv = vGlow > 2.5 ? uLamp.w : (vGlow > 1.5 ? uLamp.y + uLamp.z : uLamp.x);
+          if (vGlow > 5.5) {
+            lv = uLampExtra.x;
+          } else if (vGlow > 4.5) {
+            lv = uLampExtra.z > 0.0 ? uLampExtra.z : (uLampExtra.y > 0.0 ? (sin(vOP.x * 12.0 + uNight * 20.0) > 0.0 ? 1.0 : 0.0) : 1.0);
+          } else if (vGlow > 3.5) {
+            lv = uLampExtra.y > 0.0 ? uLampExtra.y : (sin(vOP.x * 12.0 + uNight * 20.0) < 0.0 ? 1.0 : 0.0);
+          } else if (vGlow > 2.5) {
+            if (uLampExtra.w > 0.0) lv = max(lv, uLampExtra.w);
+          }
           totalEmissiveRadiance += lc * lv * 2.4;
         }`);
   };
@@ -373,6 +450,7 @@ function carDetails(vb, def, zAt) {
     const t = def.tail;
     vb.rbox(t.x, t.y, sd * t.z, t.dx, t.dy, t.dz, 0.03, { col: COL.red, kind: KIND.LENS, glow: 2 });
     vb.rbox(t.x, t.y - t.dy * 0.7, sd * (t.z), t.dx * 0.8, 0.03, t.dz * 0.95, 0.01, { col: COL.amber, kind: KIND.LENS, glow: 3 });
+    vb.rbox(t.x, t.y - t.dy * 0.35, sd * (t.z - t.dz * 0.28), t.dx * 0.85, 0.035, t.dz * 0.44, 0.01, { col: COL.white, kind: KIND.LENS, glow: 6 });
   }
   // grille, bumpers, plate, exhaust
   const f = def.front;
@@ -425,7 +503,331 @@ const CAR_DEFS = {
     windshield: [[2.52, 1.6], [2.12, 2.44]], rearGlass: null, doorLines: [1.45, -2.9], handles: [1.7], mirrorX: 2.35,
     head: { x: 2.93, y: 0.95, z: 0.7, dx: 0.1, dy: 0.15, dz: 0.34 }, tail: { x: -2.98, y: 1.1, z: 0.8, dx: 0.06, dy: 0.5, dz: 0.12 }, front: { x: 3.0, y: 0.7, h: 0.2, w: 0.7 },
   },
+  police: {
+    L: 4.95, half: 0.95, sill: 0.30, belt: 1.06, roofY: 1.54, wheelbase: 2.95,
+    wheels: [{ x: 1.50, r: 0.355, w: 0.245, rim: COL.dark, rimKind: KIND.METAL }, { x: -1.45, r: 0.355, w: 0.245, rim: COL.dark, rimKind: KIND.METAL }],
+    top: [[-2.40, 0.34], [-2.46, 0.50], [-2.46, 0.75], [-2.42, 0.95], [-1.80, 1.00], [-1.50, 1.03], [-0.95, 1.48], [-0.15, 1.54], [0.52, 1.52], [1.15, 1.06], [1.65, 1.02], [2.10, 0.96], [2.36, 0.84], [2.44, 0.65], [2.42, 0.44], [2.35, 0.34]],
+    sideGlass: [[[-1.44, 1.08], [-0.90, 1.45], [-0.08, 1.50], [-0.08, 1.08]], [[0.04, 1.08], [0.04, 1.50], [0.48, 1.48], [1.06, 1.10]]],
+    windshield: [[1.17, 1.08], [0.56, 1.51]], rearGlass: [[-1.50, 1.05], [-0.96, 1.47]], doorLines: [-0.04, 1.05, -1.20], handles: [-0.35, 0.62], mirrorX: 1.04,
+    head: { x: 2.40, y: 0.82, z: 0.64, dx: 0.10, dy: 0.14, dz: 0.34 }, tail: { x: -2.42, y: 0.86, z: 0.65, dx: 0.08, dy: 0.14, dz: 0.34 }, front: { x: 2.44, y: 0.60, h: 0.18, w: 0.84 },
+  },
+  ambulance: {
+    L: 6.50, half: 1.10, sill: 0.38, belt: 1.30, roofY: 2.80, wheelbase: 3.80,
+    wheels: [{ x: 2.05, r: 0.41, w: 0.28 }, { x: -1.75, r: 0.41, w: 0.28 }],
+    top: [[-3.25, 0.45], [-3.25, 2.75], [-3.15, 2.80], [0.70, 2.80], [0.72, 2.22], [1.50, 2.20], [2.25, 1.50], [3.15, 1.10], [3.25, 0.85], [3.20, 0.45]],
+    sideGlass: [[[1.15, 1.50], [1.15, 2.15], [2.15, 2.15], [2.15, 1.50]]],
+    windshield: [[2.25, 1.50], [1.55, 2.20]], rearGlass: null, doorLines: [1.10], handles: [1.35], mirrorX: 2.25,
+    head: { x: 3.22, y: 0.92, z: 0.72, dx: 0.08, dy: 0.16, dz: 0.28 }, tail: { x: -3.24, y: 1.25, z: 0.98, dx: 0.06, dy: 0.20, dz: 0.16 }, front: { x: 3.25, y: 0.88, h: 0.32, w: 0.88 },
+  },
+  tow: {
+    L: 7.80, half: 1.20, sill: 0.40, belt: 1.35, roofY: 2.65, wheelbase: 4.60,
+    wheels: [{ x: 2.45, r: 0.44, w: 0.28 }, { x: -2.15, r: 0.44, w: 0.28 }],
+    top: [[-3.85, 0.70], [-3.85, 1.10], [0.85, 1.10], [0.90, 2.38], [1.70, 2.38], [2.45, 1.60], [3.35, 1.20], [3.45, 0.85], [3.40, 0.50]],
+    sideGlass: [[[1.15, 1.60], [1.15, 2.28], [2.35, 2.28], [2.35, 1.60]]],
+    windshield: [[2.45, 1.60], [1.75, 2.35]], rearGlass: null, doorLines: [1.10], handles: [1.35], mirrorX: 2.42,
+    head: { x: 3.42, y: 0.96, z: 0.76, dx: 0.08, dy: 0.16, dz: 0.28 }, tail: { x: -3.84, y: 0.78, z: 0.95, dx: 0.06, dy: 0.12, dz: 0.22 }, front: { x: 3.45, y: 0.95, h: 0.40, w: 0.92 },
+  },
+  classic_van: {
+    L: 4.60, half: 0.925, sill: 0.32, belt: 1.15, roofY: 2.05, wheelbase: 2.45,
+    wheels: [{ x: 1.15, r: 0.325, w: 0.20, rim: COL.alu, rimKind: KIND.CHROME }, { x: -1.30, r: 0.325, w: 0.20, rim: COL.alu, rimKind: KIND.CHROME }],
+    top: [[-2.28, 0.35], [-2.32, 0.55], [-2.32, 1.85], [-2.20, 2.02], [-1.80, 2.05], [1.45, 2.05], [1.90, 1.95], [2.24, 1.25], [2.28, 0.85], [2.25, 0.50], [2.18, 0.35]],
+    sideGlass: [[[0.55, 1.24], [0.55, 1.88], [1.45, 1.88], [1.45, 1.24]], [[-0.75, 1.24], [-0.75, 1.88], [0.45, 1.88], [0.45, 1.24]], [[-1.85, 1.24], [-1.85, 1.88], [-0.85, 1.88], [-0.85, 1.24]]],
+    windshield: [[2.20, 1.22], [1.50, 1.92]], rearGlass: [[-2.30, 1.35], [-2.24, 1.82]], doorLines: [0.50, -0.80], handles: [0.65, -0.65], mirrorX: 1.48,
+    head: { x: 2.24, y: 0.76, z: 0.58, dx: 0.08, dy: 0.16, dz: 0.24 }, tail: { x: -2.30, y: 0.86, z: 0.65, dx: 0.06, dy: 0.14, dz: 0.12 }, front: { x: 2.26, y: 0.76, h: 0.18, w: 0.36 },
+  },
 };
+
+export function buildPolice({ wheels = 'merged', detail = 1 } = {}) {
+  const def = {
+    L: 4.95, half: 0.95, sill: 0.30, belt: 1.06, roofY: 1.54, tumble: 0.14, crown: 0.05, endR: 0.58,
+    wheels: [{ x: 1.50, r: 0.355, w: 0.245, rim: COL.dark, rimKind: KIND.METAL }, { x: -1.45, r: 0.355, w: 0.245, rim: COL.dark, rimKind: KIND.METAL }],
+    top: [
+      [-2.40, 0.34], [-2.46, 0.50], [-2.46, 0.75], [-2.42, 0.95], [-1.80, 1.00], [-1.50, 1.03],
+      [-0.95, 1.48], [-0.15, 1.54], [0.52, 1.52], [1.15, 1.06], [1.65, 1.02], [2.10, 0.96],
+      [2.36, 0.84], [2.44, 0.65], [2.42, 0.44], [2.35, 0.34],
+    ],
+    sideGlass: [
+      [[-1.44, 1.08], [-0.90, 1.45], [-0.08, 1.50], [-0.08, 1.08]],
+      [[0.04, 1.08], [0.04, 1.50], [0.48, 1.48], [1.06, 1.10]],
+    ],
+    windshield: [[1.17, 1.08], [0.56, 1.51]],
+    rearGlass: [[-1.50, 1.05], [-0.96, 1.47]],
+    doorLines: [-0.04, 1.05, -1.20],
+    handles: [-0.35, 0.62],
+    mirrorX: 1.04,
+    head: { x: 2.40, y: 0.82, z: 0.64, dx: 0.10, dy: 0.14, dz: 0.34 },
+    tail: { x: -2.42, y: 0.86, z: 0.65, dx: 0.08, dy: 0.14, dz: 0.34 },
+    front: { x: 2.44, y: 0.60, h: 0.18, w: 0.84 },
+    mass: 1950,
+    isEmergency: true,
+    emergencyType: 'police',
+    circles: [[-1.40, 1.10], [0, 1.10], [1.40, 1.10]],
+  };
+
+  const vb = new VB();
+  const zAt = carShell(vb, def);
+  carDetails(vb, def, zAt);
+
+  const { half, sill, belt, roofY } = def;
+  const sgn = [-1, 1];
+
+  for (const sd of sgn) {
+    const doorX0 = -0.95, doorX1 = 0.95;
+    const zd = sd * (zAt(belt - 0.12, 0.0) + 0.012);
+    vb.box(doorX0, doorX1, sill + 0.08, belt - 0.03, sd > 0 ? zd - 0.01 : zd - 0.02, sd > 0 ? zd + 0.02 : zd + 0.01, { col: COL.white, kind: KIND.PAINT });
+    vb.rbox(0.0, belt - 0.22, sd * (zAt(belt - 0.22, 0.0) + 0.022), 0.20, 0.18, 0.01, 0.02, { col: lin([0.88, 0.74, 0.18]), kind: KIND.METAL });
+    const mx = 1.02, my = 1.28, mz = sd * (half + 0.08);
+    vb.cyl(mx, my, sd * (half + 0.03), 0.012, 0.08, 'z', { col: COL.alu, kind: KIND.CHROME }, 6);
+    vb.cyl(mx, my, mz, 0.065, 0.09, 'x', { col: COL.black, kind: KIND.PLASTIC }, 12);
+    vb.cyl(mx + 0.045, my, mz, 0.058, 0.015, 'x', { col: COL.lens, kind: KIND.LENS, glow: 1 }, 12);
+  }
+  vb.box(-0.85, 0.45, roofY - 0.02, roofY + 0.015, -half * 0.74, half * 0.74, { col: COL.white, kind: KIND.PAINT });
+
+  for (const sz of [-0.38, 0.38]) {
+    vb.box(2.44, 2.60, 0.42, 0.96, sz - 0.04, sz + 0.04, { col: COL.black, kind: KIND.METAL });
+    vb.box(2.60, 2.64, 0.45, 0.93, sz - 0.035, sz + 0.035, { col: COL.rubber, kind: KIND.RUBBER });
+  }
+  vb.cyl(2.52, 0.56, 0, 0.028, 0.76, 'z', { col: COL.black, kind: KIND.METAL }, 10);
+  vb.cyl(2.52, 0.86, 0, 0.028, 0.76, 'z', { col: COL.black, kind: KIND.METAL }, 10);
+  for (const sd of sgn) vb.cyl(2.48, 0.78, sd * 0.58, 0.022, 0.38, 'z', { col: COL.black, kind: KIND.METAL }, 8);
+
+  for (const sd of sgn) vb.box(-0.08, 0.08, roofY - 0.01, roofY + 0.04, sd * 0.55 - 0.035, sd * 0.55 + 0.035, { col: COL.black, kind: KIND.METAL });
+  vb.rbox(0.0, roofY + 0.045, 0.0, 0.28, 0.025, 1.34, 0.015, { col: COL.black, kind: KIND.PLASTIC });
+  vb.rbox(0.0, roofY + 0.085, 0.36, 0.22, 0.065, 0.58, 0.02, { col: lin([0.05, 0.35, 1.0]), kind: KIND.LENS, glow: 4 });
+  vb.rbox(0.0, roofY + 0.085, -0.36, 0.22, 0.065, 0.58, 0.02, { col: lin([1.0, 0.03, 0.02]), kind: KIND.LENS, glow: 5 });
+  vb.rbox(0.0, roofY + 0.085, 0.0, 0.20, 0.06, 0.12, 0.015, { col: COL.white, kind: KIND.LENS, glow: 1 });
+
+  vb.box(2.42, 2.45, 0.65, 0.72, 0.22, 0.38, { col: lin([0.05, 0.35, 1.0]), kind: KIND.LENS, glow: 4 });
+  vb.box(2.42, 2.45, 0.65, 0.72, -0.38, -0.22, { col: lin([1.0, 0.03, 0.02]), kind: KIND.LENS, glow: 5 });
+
+  const ws = carWheels(def);
+  return finish(vb, ws, {
+    L: def.L, W: def.half * 2, H: roofY + 0.12, wheelsMode: wheels, detail, kindName: 'police',
+    wheelbase: def.wheels[0].x - def.wheels[1].x, mass: def.mass, isEmergency: true, emergencyType: 'police', circles: def.circles,
+  });
+}
+
+export function buildAmbulance({ wheels = 'merged', detail = 1 } = {}) {
+  const vb = new VB();
+  const L = 6.50, W = 2.20, half = W / 2, H = 2.80;
+  const sgn = [-1, 1];
+  const boxX0 = -3.25, boxX1 = 0.72, boxY0 = 0.68, boxY1 = H;
+
+  vb.rbox((boxX0 + boxX1) / 2, (boxY0 + boxY1) / 2, 0, boxX1 - boxX0, boxY1 - boxY0, W, 0.08, { col: COL.white, kind: KIND.PAINT });
+
+  for (const sd of sgn) {
+    vb.box(boxX0, boxX1, 1.15, 1.30, sd * (half + 0.004), sd * (half + 0.014), { col: lin([0.85, 0.06, 0.05]), kind: KIND.PAINT });
+    vb.box(-1.65, -1.45, 1.70, 2.22, sd * (half + 0.015), sd * (half + 0.024), { col: lin([0.08, 0.28, 0.75]), kind: KIND.PAINT });
+    vb.box(-1.82, -1.28, 1.86, 2.06, sd * (half + 0.015), sd * (half + 0.024), { col: lin([0.08, 0.28, 0.75]), kind: KIND.PAINT });
+    vb.box(-0.6, 0.5, 0.78, 1.70, sd * (half + 0.005), sd * (half + 0.012), { col: COL.white, kind: KIND.PAINT });
+    vb.box(-2.8, -1.2, 0.78, 1.45, sd * (half + 0.005), sd * (half + 0.012), { col: COL.white, kind: KIND.PAINT });
+    vb.box(-0.08, 0.04, 1.22, 1.28, sd * (half + 0.014), sd * (half + 0.024), { col: COL.alu, kind: KIND.CHROME });
+  }
+
+  vb.box(boxX0 - 0.02, boxX0, 0.80, 2.38, -0.78, 0.78, { col: COL.white, kind: KIND.PAINT });
+  vb.box(boxX0 - 0.025, boxX0, 0.80, 2.38, -0.015, 0.015, { col: COL.black, kind: KIND.PLASTIC });
+  for (const sd of sgn) {
+    vb.box(boxX0 - 0.03, boxX0 - 0.01, 1.55, 2.15, sd * 0.42 - 0.18, sd * 0.42 + 0.18, { col: COL.glass, kind: KIND.GLASS });
+    vb.box(boxX0 - 0.035, boxX0 - 0.01, 1.25, 1.40, sd * 0.14 - 0.025, sd * 0.14 + 0.025, { col: COL.alu, kind: KIND.CHROME });
+  }
+  vb.rbox(boxX0 - 0.18, 0.52, 0.0, 0.36, 0.14, 2.05, 0.03, { col: COL.alu, kind: KIND.METAL });
+  vb.box(boxX0 - 0.28, boxX0 - 0.16, 0.46, 0.54, -0.45, 0.45, { col: COL.steel, kind: KIND.CHROME });
+
+  const cabHalf = 0.98, cabRoof = 2.24;
+  const cabX0 = 0.70, cabX1 = 3.25;
+  vb.rbox(2.0, 1.05, 0, cabX1 - cabX0, 0.85, cabHalf * 2, 0.12, { col: COL.white, kind: KIND.PAINT });
+  vb.rbox(2.45, 1.22, 0, 1.55, 0.48, cabHalf * 1.95, 0.12, { col: COL.white, kind: KIND.PAINT });
+  vb.face([3.15, 1.30, -cabHalf * 0.88], [3.15, 1.30, cabHalf * 0.88], [2.25, 2.18, cabHalf * 0.82], [2.25, 2.18, -cabHalf * 0.82], [1, 0.3, 0], { col: COL.glass, kind: KIND.GLASS });
+  vb.box(0.70, 2.25, 1.50, cabRoof, -cabHalf * 0.92, cabHalf * 0.92, { col: COL.white, kind: KIND.PAINT });
+  vb.poly([[0.70, 2.24, -cabHalf * 0.92], [0.70, 2.24, cabHalf * 0.92], [0.70, boxY1, cabHalf * 0.92], [0.70, boxY1, -cabHalf * 0.92]], [-1, 0, 0], { col: COL.white, kind: KIND.PAINT });
+  vb.face([1.8, 2.24, -cabHalf * 0.92], [1.8, 2.24, cabHalf * 0.92], [0.72, boxY1, cabHalf * 0.92], [0.72, boxY1, -cabHalf * 0.92], [0.4, 1, 0], { col: COL.white, kind: KIND.PAINT });
+
+  for (const sd of sgn) {
+    vb.box(1.2, 2.15, 1.52, 2.15, sd * (cabHalf - 0.02), sd * (cabHalf + 0.02), { col: COL.glass, kind: KIND.GLASS });
+    vb.rbox(2.25, 1.45, sd * (cabHalf + 0.15), 0.14, 0.22, 0.08, 0.02, { col: COL.black, kind: KIND.PLASTIC });
+    vb.cyl(2.25, 1.40, sd * (cabHalf + 0.06), 0.016, 0.14, 'z', { col: COL.alu, kind: KIND.CHROME }, 6);
+    vb.rbox(3.22, 0.92, sd * 0.72, 0.08, 0.16, 0.28, 0.03, { col: COL.lens, kind: KIND.LENS, glow: 1 });
+    vb.rbox(3.22, 0.75, sd * 0.72, 0.08, 0.08, 0.26, 0.02, { col: COL.amber, kind: KIND.LENS, glow: 3 });
+  }
+  vb.rbox(3.23, 0.92, 0, 0.06, 0.32, 0.88, 0.03, { col: COL.alu, kind: KIND.CHROME });
+  vb.rbox(3.25, 0.58, 0, 0.16, 0.28, cabHalf * 2.1, 0.06, { col: COL.alu, kind: KIND.CHROME });
+
+  for (let zi = -3; zi <= 3; zi++) {
+    const zPos = zi * 0.24;
+    const isBlue = zi < 0;
+    vb.box(0.70, 0.75, 2.68, 2.78, zPos - 0.09, zPos + 0.09, {
+      col: isBlue ? lin([0.05, 0.35, 1.0]) : lin([1.0, 0.03, 0.02]),
+      kind: KIND.LENS,
+      glow: isBlue ? 4 : 5,
+    });
+  }
+  for (const sd of sgn) {
+    vb.box(boxX0 - 0.03, boxX0, 2.65, 2.78, sd * 0.95 - 0.14, sd * 0.95 + 0.14, { col: lin([1.0, 0.03, 0.02]), kind: KIND.LENS, glow: 5 });
+    vb.box(boxX0 - 0.03, boxX0, 2.65, 2.78, sd * 0.35 - 0.10, sd * 0.35 + 0.10, { col: COL.amber, kind: KIND.LENS, glow: 3 });
+    vb.box(boxX0 - 0.03, boxX0, 1.25, 1.45, sd * 0.98 - 0.08, sd * 0.98 + 0.08, { col: COL.red, kind: KIND.LENS, glow: 2 });
+    vb.box(boxX0 - 0.03, boxX0, 1.05, 1.20, sd * 0.98 - 0.08, sd * 0.98 + 0.08, { col: COL.white, kind: KIND.LENS, glow: 6 });
+    for (const sx of [-2.5, -0.8]) {
+      vb.box(sx - 0.14, sx + 0.14, 2.68, 2.78, sd * (half + 0.005), sd * (half + 0.022), { col: lin([1.0, 0.03, 0.02]), kind: KIND.LENS, glow: 5 });
+    }
+  }
+  vb.box(3.24, 3.26, 0.92, 1.02, 0.25, 0.42, { col: lin([1.0, 0.03, 0.02]), kind: KIND.LENS, glow: 5 });
+  vb.box(3.24, 3.26, 0.92, 1.02, -0.42, -0.25, { col: lin([0.05, 0.35, 1.0]), kind: KIND.LENS, glow: 4 });
+
+  const wr = 0.41, ww = 0.28;
+  const wheelList = [
+    { x: 2.05, y: wr, z: half - ww / 2 + 0.01, r: wr, w: ww, steer: true, side: 1, rim: COL.alu },
+    { x: 2.05, y: wr, z: -half + ww / 2 - 0.01, r: wr, w: ww, steer: true, side: -1, rim: COL.alu },
+    { x: -1.75, y: wr, z: half - ww / 2 + 0.01, r: wr, w: ww, steer: false, side: 1, rim: COL.alu },
+    { x: -1.75, y: wr, z: -half + ww / 2 - 0.01, r: wr, w: ww, steer: false, side: -1, rim: COL.alu },
+  ];
+
+  return finish(vb, wheelList, {
+    L, W, H, wheelsMode: wheels, detail, kindName: 'ambulance',
+    wheelbase: 3.80, mass: 4200, isEmergency: true, emergencyType: 'ambulance',
+    circles: [[-2.20, 1.20], [-0.70, 1.20], [0.80, 1.20], [2.20, 1.20]],
+  });
+}
+
+export function buildTowTruck({ wheels = 'merged', detail = 1 } = {}) {
+  const vb = new VB();
+  const L = 7.80, W = 2.40, half = W / 2, H = 2.65;
+  const sgn = [-1, 1];
+
+  const cabX0 = 0.95, cabX1 = 3.45;
+  vb.rbox(2.20, 1.15, 0, cabX1 - cabX0, 1.00, half * 1.9, 0.14, { col: COL.dark, kind: KIND.PAINT, body: true });
+  vb.rbox(2.65, 1.30, 0, 1.55, 0.55, half * 1.82, 0.12, { col: COL.dark, kind: KIND.PAINT, body: true });
+  vb.face([3.35, 1.40, -half * 0.82], [3.35, 1.40, half * 0.82], [2.45, 2.32, half * 0.78], [2.45, 2.32, -half * 0.78], [1, 0.28, 0], { col: COL.glass, kind: KIND.GLASS });
+  vb.rbox(1.72, 1.88, 0, 1.50, 0.95, half * 1.84, 0.12, { col: COL.dark, kind: KIND.PAINT, body: true });
+
+  for (const sd of sgn) {
+    vb.box(1.15, 2.35, 1.60, 2.28, sd * (half * 0.92 - 0.02), sd * (half * 0.92 + 0.02), { col: COL.glass, kind: KIND.GLASS });
+    vb.rbox(2.42, 1.65, sd * (half + 0.18), 0.16, 0.26, 0.08, 0.02, { col: COL.black, kind: KIND.PLASTIC });
+    vb.cyl(2.42, 1.60, sd * (half + 0.08), 0.018, 0.16, 'z', { col: COL.alu, kind: KIND.CHROME }, 6);
+    vb.rbox(3.42, 0.96, sd * 0.76, 0.08, 0.16, 0.28, 0.03, { col: COL.lens, kind: KIND.LENS, glow: 1 });
+    vb.rbox(3.42, 0.80, sd * 0.76, 0.08, 0.08, 0.26, 0.02, { col: COL.amber, kind: KIND.LENS, glow: 3 });
+  }
+  vb.rbox(3.43, 1.05, 0, 0.06, 0.42, 0.92, 0.03, { col: COL.alu, kind: KIND.CHROME });
+  vb.rbox(3.48, 0.62, 0, 0.18, 0.32, half * 2.05, 0.06, { col: COL.steel, kind: KIND.CHROME });
+
+  const bedX0 = -3.85, bedX1 = 0.95;
+  for (const sd of sgn) vb.box(bedX0, bedX1, 0.65, 0.98, sd * 0.55 - 0.08, sd * 0.55 + 0.08, { col: COL.frame, kind: KIND.METAL });
+  vb.rbox((bedX0 + bedX1) / 2, 1.04, 0, bedX1 - bedX0, 0.10, W * 0.98, 0.02, { col: COL.alu, kind: KIND.METAL });
+  for (const sd of sgn) {
+    vb.box(bedX0, bedX1, 0.98, 1.14, sd * (half - 0.04), sd * (half + 0.01), { col: COL.frame, kind: KIND.METAL });
+  }
+  vb.poly([[bedX0 - 0.15, 0.72, -half + 0.05], [bedX0 - 0.15, 0.72, half - 0.05], [bedX0 + 0.10, 1.08, half - 0.05], [bedX0 + 0.10, 1.08, -half + 0.05]], [-0.8, -0.6, 0], { col: COL.steel, kind: KIND.METAL });
+
+  for (const sd of sgn) {
+    vb.box(0.85, 0.95, 1.05, 2.60, sd * 1.08 - 0.04, sd * 1.08 + 0.04, { col: COL.frame, kind: KIND.METAL });
+  }
+  vb.box(0.85, 0.95, 2.52, 2.62, -1.10, 1.10, { col: COL.frame, kind: KIND.METAL });
+  vb.box(0.85, 0.95, 1.65, 1.73, -1.10, 1.10, { col: COL.frame, kind: KIND.METAL });
+  for (let my = 1.75; my <= 2.45; my += 0.12) {
+    vb.cyl(0.90, my, 0, 0.012, 2.05, 'z', { col: COL.frame, kind: KIND.METAL }, 6);
+  }
+
+  vb.rbox(0.90, 2.66, 0.0, 0.18, 0.09, 1.08, 0.03, { col: COL.amber, kind: KIND.LENS, glow: 3 });
+  for (const sd of sgn) {
+    vb.box(0.80, 0.84, 2.38, 2.50, sd * 0.72 - 0.08, sd * 0.72 + 0.08, { col: COL.white, kind: KIND.LENS, glow: 1 });
+  }
+
+  vb.box(0.58, 0.78, 1.08, 1.32, -0.32, 0.32, { col: COL.black, kind: KIND.METAL });
+  vb.cyl(0.68, 1.20, 0, 0.085, 0.45, 'z', { col: COL.steel, kind: KIND.CHROME }, 12);
+  vb.box(0.50, 0.56, 1.14, 1.26, -0.16, 0.16, { col: COL.alu, kind: KIND.CHROME });
+
+  for (const sd of sgn) {
+    vb.box(-0.80, 0.65, 0.44, 0.88, sd * (half - 0.04), sd * 0.55, { col: COL.alu, kind: KIND.METAL });
+    vb.box(-2.85, -2.82, 0.24, 0.72, sd * (half - 0.02), sd * (half - 0.55), { col: COL.rubber, kind: KIND.RUBBER });
+    vb.rbox(bedX0 - 0.04, 0.78, sd * 0.95, 0.06, 0.12, 0.22, 0.02, { col: COL.red, kind: KIND.LENS, glow: 2 });
+    vb.rbox(bedX0 - 0.04, 0.65, sd * 0.95, 0.06, 0.08, 0.14, 0.01, { col: COL.white, kind: KIND.LENS, glow: 6 });
+  }
+  vb.box(-4.25, bedX0, 0.42, 0.56, -0.55, 0.55, { col: COL.frame, kind: KIND.METAL });
+  vb.box(-4.28, -4.12, 0.40, 0.54, -0.95, 0.95, { col: COL.frame, kind: KIND.METAL });
+
+  const wr = 0.44, ww = 0.28;
+  const wheelList = [
+    { x: 2.45, y: wr, z: half - ww / 2 + 0.01, r: wr, w: ww, steer: true, side: 1, rim: COL.alu },
+    { x: 2.45, y: wr, z: -half + ww / 2 - 0.01, r: wr, w: ww, steer: true, side: -1, rim: COL.alu },
+    { x: -2.15, y: wr, z: half - ww / 2 + 0.01, r: wr, w: ww, steer: false, side: 1, rim: COL.alu },
+    { x: -2.15, y: wr, z: -half + ww / 2 - 0.01, r: wr, w: ww, steer: false, side: -1, rim: COL.alu },
+  ];
+
+  return finish(vb, wheelList, {
+    L, W, H, wheelsMode: wheels, detail, kindName: 'tow',
+    wheelbase: 4.60, mass: 6800, isEmergency: true, emergencyType: 'tow',
+    circles: [[-2.60, 1.30], [-0.90, 1.30], [0.90, 1.30], [2.60, 1.30]],
+  });
+}
+
+export function buildClassicVan({ wheels = 'merged', detail = 1 } = {}) {
+  const vb = new VB();
+  const L = 4.60, W = 1.85, half = W / 2, H = 2.05;
+  const sgn = [-1, 1];
+  const sill = 0.32, belt = 1.15, roofY = 1.98;
+
+  vb.rbox(0.0, (sill + belt) / 2, 0.0, L, belt - sill, W, 0.16, { col: [1, 1, 1], kind: KIND.PAINT, body: true });
+  vb.rbox(L / 2 - 0.08, (sill + belt) / 2 + 0.05, 0.0, 0.32, belt - sill - 0.1, W * 0.94, 0.18, { col: [1, 1, 1], kind: KIND.PAINT, body: true });
+
+  vb.rbox(-0.15, (belt + roofY) / 2, 0.0, L - 0.65, roofY - belt, W * 0.90, 0.14, { col: COL.white, kind: KIND.PAINT });
+  vb.face([2.20, 1.22, -half * 0.84], [2.20, 1.22, half * 0.84], [1.50, 1.92, half * 0.80], [1.50, 1.92, -half * 0.80], [1, 0.25, 0], { col: COL.glass, kind: KIND.GLASS });
+  vb.box(-L / 2 + 0.08, -L / 2 + 0.14, 1.35, 1.82, -0.55, 0.55, { col: COL.glass, kind: KIND.GLASS });
+
+  for (const sd of sgn) {
+    vb.box(0.55, 1.45, 1.24, 1.88, sd * (half * 0.90 - 0.02), sd * (half * 0.90 + 0.02), { col: COL.glass, kind: KIND.GLASS });
+    vb.box(-0.75, 0.45, 1.24, 1.88, sd * (half * 0.90 - 0.02), sd * (half * 0.90 + 0.02), { col: COL.glass, kind: KIND.GLASS });
+    vb.box(-1.85, -0.85, 1.24, 1.88, sd * (half * 0.90 - 0.02), sd * (half * 0.90 + 0.02), { col: COL.glass, kind: KIND.GLASS });
+    for (let sy = 1.34; sy <= 1.78; sy += 0.08) {
+      vb.box(-0.72, 0.42, sy - 0.008, sy + 0.008, sd * (half * 0.90 + 0.01), sd * (half * 0.90 + 0.025), { col: COL.alu, kind: KIND.CHROME });
+    }
+    for (let ly = 0.85; ly <= 1.10; ly += 0.05) {
+      vb.box(-1.85, -1.45, ly - 0.006, ly + 0.006, sd * (half - 0.005), sd * (half + 0.015), { col: COL.black, kind: KIND.PLASTIC });
+    }
+    vb.cyl(1.48, 1.35, sd * (half + 0.12), 0.065, 0.02, 'x', { col: COL.alu, kind: KIND.CHROME }, 12);
+    vb.cyl(1.48, 1.32, sd * (half + 0.05), 0.012, 0.12, 'z', { col: COL.alu, kind: KIND.CHROME }, 6);
+  }
+
+  for (const sd of sgn) {
+    vb.cyl(2.23, 0.76, sd * 0.58, 0.13, 0.04, 'x', { col: COL.alu, kind: KIND.CHROME }, 18);
+    vb.cyl(2.25, 0.76, sd * 0.58, 0.115, 0.02, 'x', { col: COL.lens, kind: KIND.LENS, glow: 1 }, 18);
+    vb.rbox(2.22, 1.04, sd * 0.62, 0.04, 0.07, 0.12, 0.02, { col: COL.amber, kind: KIND.LENS, glow: 3 });
+  }
+  vb.cyl(2.25, 0.76, 0.0, 0.18, 0.025, 'x', { col: COL.alu, kind: KIND.CHROME }, 20);
+
+  vb.rbox(2.28, 0.44, 0.0, 0.14, 0.16, W * 0.98, 0.06, { col: COL.alu, kind: KIND.CHROME });
+  for (const sd of sgn) vb.rbox(2.32, 0.50, sd * 0.48, 0.08, 0.24, 0.06, 0.02, { col: COL.alu, kind: KIND.CHROME });
+  vb.rbox(-L / 2 - 0.04, 0.44, 0.0, 0.14, 0.16, W * 0.98, 0.06, { col: COL.alu, kind: KIND.CHROME });
+
+  const tentX0 = -1.65, tentX1 = 0.85, tentZ = 0.68;
+  for (const sd of sgn) {
+    vb.box(tentX0, tentX1, roofY, 2.38, sd * tentZ - 0.02, sd * tentZ + 0.02, { col: lin([0.88, 0.78, 0.62]), kind: KIND.CLOTH });
+    vb.box(-0.65, 0.05, 2.08, 2.26, sd * tentZ + 0.005, sd * tentZ + 0.025, { col: COL.glass, kind: KIND.GLASS });
+  }
+  vb.box(tentX0 - 0.02, tentX0 + 0.02, roofY, 2.38, -tentZ, tentZ, { col: lin([0.88, 0.78, 0.62]), kind: KIND.CLOTH });
+  vb.box(tentX0 - 0.06, tentX1 + 0.06, 2.38, 2.45, -tentZ - 0.06, tentZ + 0.06, { col: COL.white, kind: KIND.PAINT });
+  vb.box(tentX1 + 0.08, 1.55, roofY - 0.02, roofY + 0.10, -tentZ - 0.04, tentZ + 0.04, { col: COL.white, kind: KIND.PAINT });
+
+  vb.box(-L / 2 - 0.06, -L / 2, 0.82, 0.94, -0.15, 0.15, { col: COL.frame, kind: KIND.METAL });
+  addWheel(vb, 0.325, 0.20, { rim: COL.alu, spokes: 4, lugs: 4, offset: [-L / 2 - 0.12, 0.88, 0] });
+
+  for (const sd of sgn) {
+    vb.rbox(-L / 2 + 0.02, 0.86, sd * 0.65, 0.06, 0.14, 0.12, 0.02, { col: COL.red, kind: KIND.LENS, glow: 2 });
+    vb.rbox(-L / 2 + 0.02, 0.72, sd * 0.65, 0.06, 0.06, 0.12, 0.01, { col: COL.white, kind: KIND.LENS, glow: 6 });
+  }
+
+  const wr = 0.325, ww = 0.20;
+  const wheelList = [
+    { x: 1.15, y: wr, z: half - ww / 2 + 0.01, r: wr, w: ww, steer: true, side: 1, rim: COL.alu, rimKind: KIND.CHROME },
+    { x: 1.15, y: wr, z: -half + ww / 2 - 0.01, r: wr, w: ww, steer: true, side: -1, rim: COL.alu, rimKind: KIND.CHROME },
+    { x: -1.30, y: wr, z: half - ww / 2 + 0.01, r: wr, w: ww, steer: false, side: 1, rim: COL.alu, rimKind: KIND.CHROME },
+    { x: -1.30, y: wr, z: -half + ww / 2 - 0.01, r: wr, w: ww, steer: false, side: -1, rim: COL.alu, rimKind: KIND.CHROME },
+  ];
+
+  return finish(vb, wheelList, {
+    L, W, H: 2.45, wheelsMode: wheels, detail, kindName: 'classic_van',
+    wheelbase: 2.45, mass: 1800, isEmergency: false,
+    circles: [[-1.30, 1.05], [0, 1.05], [1.30, 1.05]],
+  });
+}
 
 /**
  * A passenger vehicle. Returns { geo, wheels, dims } — wheels are listed separately so the player
@@ -433,6 +835,10 @@ const CAR_DEFS = {
  */
 export function buildCar(kind = 'sedan', { wheels = 'merged', detail = 1 } = {}) {
   if (kind === 'pickup') return buildPickup({ wheels, detail });
+  if (kind === 'police') return buildPolice({ wheels, detail });
+  if (kind === 'ambulance') return buildAmbulance({ wheels, detail });
+  if (kind === 'tow') return buildTowTruck({ wheels, detail });
+  if (kind === 'classic_van') return buildClassicVan({ wheels, detail });
   const def = CAR_DEFS[kind] || CAR_DEFS.sedan;
   const vb = new VB();
   const zAt = carShell(vb, def);
@@ -475,7 +881,10 @@ function buildPickup({ wheels, detail }) {
   vb.rbox(bedX0 - 0.03, 1.33, 0, 0.06, 0.05, W - 0.1, 0.02, { col: COL.alu, kind: KIND.CHROME });
   vb.rbox(bedX0 - 0.1, 0.55, 0, 0.14, 0.26, W * 0.92, 0.07, { col: COL.black, kind: KIND.PLASTIC });
   vb.box(bedX0 - 0.2, bedX0 - 0.16, 0.6, 0.74, -0.26, 0.26, { col: COL.plate, kind: KIND.PLASTIC });
-  for (const sd of [-1, 1]) vb.rbox(bedX0 - 0.025, 1.04, sd * (cab.half - 0.14), 0.06, 0.2, 0.14, 0.03, { col: COL.red, kind: KIND.LENS, glow: 2 });
+  for (const sd of [-1, 1]) {
+    vb.rbox(bedX0 - 0.025, 1.04, sd * (cab.half - 0.14), 0.06, 0.2, 0.14, 0.03, { col: COL.red, kind: KIND.LENS, glow: 2 });
+    vb.rbox(bedX0 - 0.025, 0.90, sd * (cab.half - 0.14), 0.05, 0.06, 0.12, 0.02, { col: COL.white, kind: KIND.LENS, glow: 6 });
+  }
   vb.box(bedX1 - 2.5, bedX1 + 0.1, 0.3, 0.46, -cab.half * 0.85, cab.half * 0.85, { col: COL.black, kind: KIND.PLASTIC });
   const ws = carWheels({ ...cab, wheels: cab.wheels.map((w) => ({ ...w })) });
   return finish(vb, ws, { L: 6.0, W, H: cab.roofY, wheelsMode: wheels, detail, kindName: 'pickup', wheelbase: 3.2 });
@@ -483,9 +892,46 @@ function buildPickup({ wheels, detail }) {
 
 function finish(vb, wheelList, meta) {
   const { wheelsMode, detail } = meta;
-  const out = { dims: { L: meta.L, W: meta.W, H: meta.H }, wheels: wheelList, kind: meta.kindName, wheelbase: meta.wheelbase };
+  const wheelsWithAnchors = wheelList.map((w) => ({
+    ...w,
+    suspensionAnchor: w.suspensionAnchor || [w.x, w.y + 0.25, w.z],
+  }));
+  const suspension = meta.suspension || {
+    travel: 0.18,
+    stiffness: 28000,
+    damping: 2400,
+    restLength: 0.35,
+    anchors: wheelsWithAnchors.map((w) => ({ x: w.x, y: w.suspensionAnchor[1], z: w.z })),
+  };
+  const footprint = meta.footprint || {
+    length: meta.L,
+    width: meta.W,
+    frontOverhang: meta.frontOverhang ?? Math.max(0.4, (meta.L - meta.wheelbase) * 0.5),
+    rearOverhang: meta.rearOverhang ?? Math.max(0.4, (meta.L - meta.wheelbase) * 0.5),
+  };
+  const circles = meta.circles || [
+    [-meta.L * 0.3, meta.W * 0.52],
+    [0, meta.W * 0.52],
+    [meta.L * 0.3, meta.W * 0.52],
+  ];
+  const mass = meta.mass || 1800;
+  const isEmergency = !!meta.isEmergency;
+  const emergencyType = meta.emergencyType || null;
+
+  const out = {
+    dims: { L: meta.L, W: meta.W, H: meta.H },
+    wheels: wheelsWithAnchors,
+    kind: meta.kindName,
+    wheelbase: meta.wheelbase,
+    suspension,
+    footprint,
+    circles,
+    mass,
+    isEmergency,
+    emergencyType,
+  };
   const addAll = (b, mirrorSide) => {
-    for (const w of wheelList) {
+    for (const w of wheelsWithAnchors) {
       const sub = new VB();
       addWheel(sub, w.r, w.w, { spokes: detail > 0.6 ? 5 : 3, lugs: detail > 0.6 ? 5 : 0 });
       void mirrorSide;
@@ -496,9 +942,9 @@ function finish(vb, wheelList, meta) {
   void addAll;
   if (wheelsMode === 'merged') {
     const wheelVB = new VB();
-    for (const w of wheelList) {
+    for (const w of wheelsWithAnchors) {
       const sub = new VB();
-      addWheel(sub, w.r, w.w, { spokes: detail > 0.6 ? 5 : 3, lugs: detail > 0.6 ? 6 : 0 });
+      addWheel(sub, w.r, w.w, { spokes: detail > 0.6 ? 5 : 3, lugs: detail > 0.6 ? 6 : 0, rim: w.rim });
       // the wheel is modelled facing +z; for the left side it faces -z
       const mtx = new THREE.Matrix4().makeTranslation(w.x, w.y, w.z);
       if (w.side < 0) mtx.multiply(new THREE.Matrix4().makeRotationY(Math.PI));
@@ -510,8 +956,8 @@ function finish(vb, wheelList, meta) {
     out.geo = vb.build();
     out.wheelGeo = (() => {
       const sub = new VB();
-      const w0 = wheelList[0];
-      addWheel(sub, w0.r, w0.w, { spokes: 5, lugs: 6 });
+      const w0 = wheelsWithAnchors[0];
+      addWheel(sub, w0.r, w0.w, { spokes: 5, lugs: 6, rim: w0.rim });
       return sub.build();
     })();
   }
@@ -523,6 +969,7 @@ function copyInto(dst, src, m) {
   const base = dst.count;
   const nm = new THREE.Matrix3().getNormalMatrix(m);
   const v = new THREE.Vector3(), n = new THREE.Vector3();
+  const hasDmg = src.DMG && src.DMG.length === src.count * 4;
   for (let i = 0; i < src.count; i++) {
     v.set(src.P[i * 3], src.P[i * 3 + 1], src.P[i * 3 + 2]).applyMatrix4(m);
     n.set(src.N[i * 3], src.N[i * 3 + 1], src.N[i * 3 + 2]).applyMatrix3(nm).normalize();
@@ -532,6 +979,8 @@ function copyInto(dst, src, m) {
     dst.K.push(src.K[i]);
     dst.B.push(src.B[i]);
     dst.G.push(src.G[i]);
+    if (hasDmg) dst.DMG.push(src.DMG[i * 4], src.DMG[i * 4 + 1], src.DMG[i * 4 + 2], src.DMG[i * 4 + 3]);
+    else dst.DMG.push(0, 0, 0, 0);
     dst.D.push(src.D[i * 2], src.D[i * 2 + 1]);
   }
   for (const i of src.I) dst.I.push(base + i);
@@ -778,6 +1227,7 @@ export function buildTractor({ sleeper = true, wheels = 'separate', detail = 1 }
     for (let i = 0; i < 6; i++) vb.tr(new THREE.TorusGeometry(0.06, 0.012, 6, 12), -1.1, 2.05 - s * 0.06 + i * 0.0, s * 0.45 + i * 0.03, s > 0 ? { col: COL.red, kind: KIND.RUBBER } : { col: COL.amber, kind: KIND.RUBBER }, 0, Math.PI / 2, 0);
     vb.rbox(-1.1, 1.7, s * 0.45, 0.06, 0.1, 0.1, 0.02, ALU); // gladhand
     vb.rbox(-1.97, 0.95, s * 0.8, 0.08, 0.12, 0.22, 0.02, { col: COL.red, kind: KIND.LENS, glow: 2 });
+    vb.rbox(-1.97, 0.81, s * 0.8, 0.08, 0.08, 0.14, 0.02, { col: COL.white, kind: KIND.LENS, glow: 6 });
     vb.box(-1.55, -1.5, 0.15, 0.7, s * 0.55, s * 1.4, rub);
     vb.rbox(-1.52, 0.5, s * 0.98, 0.04, 0.2, 0.2, 0.02, ALU);
   }
@@ -860,6 +1310,7 @@ function trailerChassis(vb, { skirts = true, landing = true } = {}) {
   for (const s of [-1, 1]) vb.rbox(rx - 0.08, 0.95, s * 1.05, 0.12, 0.5, 0.14, 0.03, FRAME);
   for (const s of [-1, 1]) for (const [y, z] of [[1.55, 0.2], [1.55, 0.6], [1.55, 1.0]]) vb.cyl(rx - 0.03, y, s * z, 0.075, 0.05, 'x', { col: COL.red, kind: KIND.LENS, glow: 2 }, 12);
   for (const s of [-1, 1]) vb.cyl(rx - 0.03, 1.3, s * 1.15, 0.045, 0.04, 'x', { col: COL.amber, kind: KIND.LENS, glow: 3 }, 10);
+  for (const s of [-1, 1]) vb.cyl(rx - 0.03, 1.3, s * 0.4, 0.05, 0.04, 'x', { col: COL.white, kind: KIND.LENS, glow: 6 }, 10);
   vb.box(rx - 0.04, rx - 0.01, 1.3, 1.62, -0.28, 0.28, { col: COL.plate, kind: KIND.PLASTIC });
   for (let i = 0; i < 9; i++) vb.box(rx - 0.02, rx, 1.24, 1.3, -1.25 + i * 0.28, -1.25 + i * 0.28 + 0.14, { col: i % 2 ? COL.white : lin([0.8, 0.08, 0.08]), kind: KIND.PLASTIC });
   if (skirts) for (const s of [-1, 1]) vb.rbox(-6.9, 0.98, s * 1.31, 6.6, 0.3, 0.03, 0.01, { col: COL.alu, kind: KIND.METAL });
@@ -1117,3 +1568,54 @@ export function buildCabInterior() {
   out.gauge = { a: [3.265, 1.96, -0.8], b: [3.265, 1.96, -0.3], c: [3.265, 2.17, -0.3], d: [3.265, 2.17, -0.8] };
   return out;
 }
+
+export const VEHICLE_METADATA = {
+  sedan: { mass: 1550, wheelbase: 2.7, isEmergency: false },
+  suv: { mass: 2100, wheelbase: 2.85, isEmergency: false },
+  hatch: { mass: 1300, wheelbase: 2.55, isEmergency: false },
+  van: { mass: 2600, wheelbase: 3.6, isEmergency: false },
+  pickup: { mass: 2400, wheelbase: 3.2, isEmergency: false },
+  police: { mass: 1950, wheelbase: 3.05, isEmergency: true, emergencyType: 'police' },
+  ambulance: { mass: 4200, wheelbase: 3.55, isEmergency: true, emergencyType: 'ambulance' },
+  tow: { mass: 5500, wheelbase: 4.8, isEmergency: true, emergencyType: 'tow' },
+  classic_van: { mass: 1800, wheelbase: 2.45, isEmergency: false },
+  tractor: { mass: 8500, wheelbase: 5.2, isEmergency: false },
+};
+
+export function isReversing(speed = 0, gear = 'D') {
+  return gear === 'R' || speed < -0.1;
+}
+
+export function computeReverseGlow(speed = 0, gear = 'D') {
+  return isReversing(speed, gear) ? 1.0 : 0.0;
+}
+
+export function computeEmergencyStrobe(timeSec, emergencyType = 'police') {
+  const t = timeSec * 5.0;
+  const phase = Math.floor(t) % 2;
+  const flash = (t - Math.floor(t)) < 0.4 ? 1.0 : 0.0;
+  if (emergencyType === 'police') {
+    return {
+      blue: phase === 0 ? flash : 0.0,
+      red: phase === 1 ? flash : 0.0,
+      amber: 0.0,
+    };
+  }
+  if (emergencyType === 'ambulance') {
+    return {
+      blue: phase === 1 ? flash : 0.0,
+      red: phase === 0 ? flash : 0.0,
+      amber: 0.0,
+    };
+  }
+  if (emergencyType === 'tow') {
+    const amberPulse = (Math.sin(timeSec * 16.0) > 0.1) ? 1.0 : 0.0;
+    return {
+      blue: 0.0,
+      red: 0.0,
+      amber: amberPulse,
+    };
+  }
+  return { blue: 0.0, red: 0.0, amber: 0.0 };
+}
+

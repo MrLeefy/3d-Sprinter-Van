@@ -116,7 +116,7 @@ export function runawaySite(hs, ss, minGrade = 0.034, win = 650) {
  * Returns { lots, overpasses, runaway } with lots = [{ kind, side, s0, s1, w, taper, face, ... }].
  */
 export function planHighway(e) {
-  const out = { lots: [], overpasses: [], runaway: null };
+  const out = { lots: [], overpasses: [], runaway: null, bridges: e.bridges || [] };
   if (e.cls !== 'interstate' && e.cls !== 'highway') return out;
   const big = e.cls === 'interstate';
   const key = hashStr(e.id);
@@ -253,3 +253,98 @@ export function exitLabel(e, ov) {
   const pick = near.name && near.kind !== 'junction' ? near : far.name && far.kind !== 'junction' ? far : null;
   return pick ? pick.name : ['County Rd', 'Ranch Rd', 'Mill Rd', 'Frontage Rd'][ov.local % 4];
 }
+
+/**
+ * Detect procedural bridges and culverts crossing terrain depressions.
+ * Bridges: elevation diff (e.hs[k] - baseHeight > 3.8m) over span >= 24m.
+ * Culverts: elevation diff (1.5m to 3.5m) over span 10m to 24m.
+ * Returns [{ s0, s1, kind: 'bridge' | 'culvert', clearance, height }]
+ */
+export function scanBridges(e, baseHeights, world) {
+  if (!baseHeights || !e || !e.hs || !e.ss || e.n < 2) return [];
+  const n = e.n;
+  const bridges = [];
+  const minBridgeDiff = 3.8;
+  const minCulvertDiff = 1.5;
+  const maxCulvertDiff = 3.8;
+
+  let inRun = false;
+  let kStart = 0;
+
+  for (let k = 0; k < n; k++) {
+    const diff = e.hs[k] - baseHeights[k];
+    if (diff >= minCulvertDiff) {
+      if (!inRun) {
+        inRun = true;
+        kStart = k;
+      }
+    } else {
+      if (inRun) {
+        inRun = false;
+        processRun(kStart, k - 1);
+      }
+    }
+  }
+  if (inRun) {
+    processRun(kStart, n - 1);
+  }
+
+  function processRun(k0, k1) {
+    const s0 = e.ss[k0];
+    const s1 = e.ss[k1];
+    if (s0 < 30 || s1 > e.len - 30) return;
+
+    let maxDiff = 0;
+    let maxH = -Infinity;
+    for (let k = k0; k <= k1; k++) {
+      const d = e.hs[k] - baseHeights[k];
+      if (d > maxDiff) maxDiff = d;
+      if (e.hs[k] > maxH) maxH = e.hs[k];
+    }
+
+    if (maxDiff > minBridgeDiff) {
+      let b0 = k0, b1 = k1;
+      while (b0 <= k1 && (e.hs[b0] - baseHeights[b0]) < minBridgeDiff) b0++;
+      while (b1 >= k0 && (e.hs[b1] - baseHeights[b1]) < minBridgeDiff) b1--;
+      if (b0 <= b1) {
+        const span = e.ss[b1] - e.ss[b0];
+        if (span >= 24) {
+          // Verify terrain beside bridge drops (ravine check)
+          if (world && world.baseHeight && b0 > 0 && b0 < n - 1) {
+            const dx = e.xs[b0 + 1] - e.xs[b0 - 1];
+            const dz = e.zs[b0 + 1] - e.zs[b0 - 1];
+            const l = Math.hypot(dx, dz);
+            if (l > 1e-4) {
+              const nx = -dz / l, nz = dx / l;
+              const sideH = world.baseHeight(e.xs[b0] + nx * 25, e.zs[b0] + nz * 25);
+              if (sideH >= e.hs[b0]) return;
+            }
+          }
+          bridges.push({
+            s0: e.ss[b0],
+            s1: e.ss[b1],
+            kind: 'bridge',
+            clearance: Math.round(maxDiff * 10) / 10,
+            height: Math.round(maxH * 10) / 10,
+          });
+          return;
+        }
+      }
+    }
+
+    const span = s1 - s0;
+    if (span >= 10 && span <= 24 && maxDiff >= minCulvertDiff && maxDiff <= maxCulvertDiff) {
+      bridges.push({
+        s0: e.ss[k0],
+        s1: e.ss[k1],
+        kind: 'culvert',
+        clearance: Math.round(maxDiff * 10) / 10,
+        height: Math.round(maxH * 10) / 10,
+      });
+    }
+  }
+
+  bridges.sort((a, b) => a.s0 - b.s0);
+  return bridges;
+}
+

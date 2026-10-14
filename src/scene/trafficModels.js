@@ -18,6 +18,9 @@ const TYRE = { col: COL.rubber, kind: KIND.RUBBER };
 const HEAD = { col: COL.lens, kind: KIND.LENS, glow: 1 };
 const TAIL = { col: COL.red, kind: KIND.LENS, glow: 2 };
 const AMBER = { col: COL.amber, kind: KIND.LENS, glow: 3 };
+const BLUE = { col: [0.1, 0.3, 0.95], kind: KIND.LENS, glow: 4 };
+const RED_STROBE = { col: [0.95, 0.1, 0.1], kind: KIND.LENS, glow: 5 };
+const REVERSE = { col: COL.white, kind: KIND.LENS, glow: 6 };
 const WHITE = { col: COL.white, kind: KIND.METAL };
 
 /** Append one builder's vertices into another under a matrix. */
@@ -25,6 +28,7 @@ function appendVB(dst, src, m) {
   const base = dst.count;
   const nm = new THREE.Matrix3().getNormalMatrix(m);
   const v = new THREE.Vector3(), n = new THREE.Vector3();
+  const hasDmg = src.DMG && src.DMG.length === src.count * 4;
   for (let i = 0; i < src.count; i++) {
     v.set(src.P[i * 3], src.P[i * 3 + 1], src.P[i * 3 + 2]).applyMatrix4(m);
     n.set(src.N[i * 3], src.N[i * 3 + 1], src.N[i * 3 + 2]).applyMatrix3(nm).normalize();
@@ -34,6 +38,10 @@ function appendVB(dst, src, m) {
     dst.K.push(src.K[i]);
     dst.B.push(src.B[i]);
     dst.G.push(src.G[i]);
+    if (dst.DMG) {
+      if (hasDmg) dst.DMG.push(src.DMG[i * 4], src.DMG[i * 4 + 1], src.DMG[i * 4 + 2], src.DMG[i * 4 + 3]);
+      else dst.DMG.push(0, 0, 0, 0);
+    }
     dst.D.push(src.D[i * 2], src.D[i * 2 + 1]);
   }
   for (const i of src.I) dst.I.push(base + i);
@@ -65,6 +73,10 @@ const LO_CARS = {
   hatch: { L: 4.05, W: 1.7, sill: 0.27, belt: 0.98, cab: [[-1.95, 1.0], [-1.7, 1.42], [0.2, 1.44], [0.85, 1.0]], wheels: [1.28, -1.2], wr: 0.31, ww: 0.2, hy: 0.76, ty: 0.88 },
   van: { L: 5.9, W: 1.96, sill: 0.36, belt: 1.25, cab: [[-2.95, 1.25], [-2.9, 2.46], [1.6, 2.54], [2.1, 2.5], [2.55, 1.58], [2.55, 1.25]], wheels: [1.85, -1.75], wr: 0.375, ww: 0.235, hy: 0.95, ty: 1.1 },
   pickup: { L: 5.9, W: 1.94, sill: 0.4, belt: 1.32, cab: [[-0.35, 1.32], [-0.15, 1.9], [1.0, 1.9], [1.46, 1.45], [1.75, 1.3]], wheels: [1.75, -1.45], wr: 0.4, ww: 0.26, hy: 1.0, ty: 1.0, bed: true },
+  police: { L: 5.0, W: 1.92, sill: 0.3, belt: 1.05, cab: [[-1.65, 1.05], [-1.05, 1.48], [0.65, 1.48], [1.25, 1.05]], wheels: [1.6, -1.5], wr: 0.35, ww: 0.245, hy: 0.82, ty: 0.85, police: true },
+  ambulance: { L: 6.4, W: 2.3, sill: 0.42, belt: 1.32, cab: [[-0.35, 1.32], [-0.15, 2.0], [1.0, 2.0], [1.46, 1.45], [1.85, 1.32]], wheels: [1.85, -1.6], wr: 0.42, ww: 0.28, hy: 1.05, ty: 1.15, ambulance: true },
+  tow: { L: 7.6, W: 2.3, sill: 0.45, belt: 1.35, cab: [[-0.35, 1.35], [-0.15, 1.95], [1.05, 1.95], [1.5, 1.45], [1.8, 1.3]], wheels: [1.9, -1.8], wr: 0.45, ww: 0.28, hy: 1.05, ty: 0.9, tow: true },
+  classic_van: { L: 4.5, W: 1.76, sill: 0.35, belt: 1.25, cab: [[-2.15, 1.25], [-2.1, 1.96], [1.1, 1.96], [1.6, 1.9], [1.85, 1.45], [1.9, 1.25]], wheels: [1.15, -1.3], wr: 0.325, ww: 0.20, hy: 0.82, ty: 0.84, classic_van: true },
 };
 
 function loCar(d) {
@@ -87,10 +99,39 @@ function loCar(d) {
   for (const s of [-1, 1]) {
     vb.box(L2 - 0.03, L2 + 0.02, d.hy - 0.07, d.hy + 0.07, s * hw * 0.62 - 0.17, s * hw * 0.62 + 0.17, HEAD);
     vb.box(-L2 - 0.02, -L2 + 0.03, d.ty - 0.07, d.ty + 0.07, s * hw * 0.62 - 0.17, s * hw * 0.62 + 0.17, TAIL);
+    vb.box(-L2 - 0.02, -L2 + 0.03, d.ty - 0.17, d.ty - 0.09, s * hw * 0.62 - 0.14, s * hw * 0.62 + 0.14, REVERSE);
     for (const x of d.wheels) wheelLo(vb, x, d.wr, s * (hw - d.ww / 2 + 0.01), d.wr, d.ww);
   }
   vb.box(L2 - 0.1, L2 + 0.04, d.sill + 0.04, d.sill + 0.26, -hw * 0.92, hw * 0.92, BLK);
   vb.box(-L2 - 0.04, -L2 + 0.1, d.sill + 0.04, d.sill + 0.26, -hw * 0.92, hw * 0.92, BLK);
+
+  if (d.police) {
+    vb.box((xa + xb) / 2 - 0.14, (xa + xb) / 2 + 0.14, top[1] + 0.03, top[1] + 0.15, -0.46, -0.06, RED_STROBE);
+    vb.box((xa + xb) / 2 - 0.14, (xa + xb) / 2 + 0.14, top[1] + 0.03, top[1] + 0.15, 0.06, 0.46, BLUE);
+    vb.box((xa + xb) / 2 - 0.12, (xa + xb) / 2 + 0.12, top[1] + 0.03, top[1] + 0.15, -0.06, 0.06, WHITE);
+    vb.box(L2 + 0.04, L2 + 0.14, d.sill + 0.06, d.sill + 0.48, -0.45, 0.45, BLK);
+  } else if (d.ambulance) {
+    const boxX0 = -L2 + 0.05, boxX1 = 0.35, boxTop = 2.65;
+    vb.box(boxX0, boxX1, d.sill, boxTop, -hw, hw, WHITE);
+    vb.box(boxX1 - 0.12, boxX1, boxTop - 0.12, boxTop + 0.04, -hw - 0.02, -hw * 0.5, RED_STROBE);
+    vb.box(boxX1 - 0.12, boxX1, boxTop - 0.12, boxTop + 0.04, hw * 0.5, hw + 0.02, BLUE);
+    vb.box(boxX0, boxX0 + 0.12, boxTop - 0.12, boxTop + 0.04, -hw - 0.02, -hw * 0.5, RED_STROBE);
+    vb.box(boxX0, boxX0 + 0.12, boxTop - 0.12, boxTop + 0.04, hw * 0.5, hw + 0.02, BLUE);
+    vb.box(boxX0 - 0.02, boxX0 + 0.02, d.sill + 0.4, boxTop - 0.3, -0.65, 0.65, BLK);
+  } else if (d.tow) {
+    const bedX0 = -L2 + 0.05, bedX1 = -0.3;
+    vb.box(bedX0, bedX1, 0.98, 1.12, -hw, hw, { col: COL.steel, kind: KIND.METAL });
+    vb.box(bedX1 - 0.08, bedX1 + 0.02, 1.12, top[1] + 0.28, -hw * 0.92, hw * 0.92, FRAME);
+    vb.box(bedX1 - 0.12, bedX1 + 0.06, top[1] + 0.28, top[1] + 0.42, -0.4, 0.4, AMBER);
+    vb.cyl(bedX1 + 0.1, 1.25, 0, 0.12, 0.4, 'z', BLK, 8);
+  } else if (d.classic_van) {
+    const popX0 = -L2 * 0.55, popX1 = L2 * 0.35;
+    vb.box(popX0, popX1, top[1] + 0.02, top[1] + 0.32, -hw * 0.82, hw * 0.82, { col: lin([0.88, 0.78, 0.62]), kind: KIND.CLOTH });
+    vb.box(popX0 - 0.04, popX1 + 0.04, top[1] + 0.32, top[1] + 0.38, -hw * 0.85, hw * 0.85, WHITE);
+    wheelLo(vb, -L2 - 0.12, d.wr + 0.35, 0, d.wr * 0.95, d.ww);
+    vb.box(L2 + 0.02, L2 + 0.12, d.sill + 0.05, d.sill + 0.24, -hw * 0.92, hw * 0.92, CH);
+    vb.box(-L2 - 0.12, -L2 - 0.02, d.sill + 0.05, d.sill + 0.24, -hw * 0.92, hw * 0.92, CH);
+  }
   return vb.build();
 }
 
@@ -110,6 +151,7 @@ function buildRV(hi) {
     vb.box(4.14, 4.22, 0.85, 1.15, s * 0.8 - 0.2, s * 0.8 + 0.2, HEAD);
     vb.box(-4.62, -4.58, 0.95, 1.6, s * 1.0 - 0.07, s * 1.0 + 0.07, TAIL);
     vb.box(-4.62, -4.58, 1.7, 1.78, s * 1.0 - 0.07, s * 1.0 + 0.07, AMBER);
+    vb.box(-4.62, -4.58, 0.80, 0.92, s * 1.0 - 0.07, s * 1.0 + 0.07, REVERSE);
   }
   vb.box(-4.4, -4.3, 2.05, 3.0, -0.4, 0.4, GLS);
   vb.box(4.12, 4.35, 0.5, 0.95, -1.15, 1.15, BLK); // bumper
@@ -136,6 +178,7 @@ function buildCoach(hi) {
     vb.box(L / 2 - 0.02, L / 2 + 0.04, 0.85, 1.1, s * 0.8 - 0.2, s * 0.8 + 0.2, HEAD);
     vb.box(-L / 2 - 0.04, -L / 2 + 0.02, 0.95, 1.2, s * 1.0 - 0.18, s * 1.0 + 0.18, TAIL);
     vb.box(-L / 2 - 0.04, -L / 2 + 0.02, 1.45, 1.55, s * 1.0 - 0.1, s * 1.0 + 0.1, AMBER);
+    vb.box(-L / 2 - 0.04, -L / 2 + 0.02, 0.80, 0.92, s * 1.0 - 0.14, s * 1.0 + 0.14, REVERSE);
   }
   vb.face([L / 2 + 0.02, 1.2, -1.15], [L / 2 + 0.02, 1.2, 1.15], [L / 2 - 0.1, 3.3, 1.15], [L / 2 - 0.1, 3.3, -1.15], [1, 0.1, 0], GLS);
   vb.box(-L / 2 + 0.1, -L / 2 + 0.16, 2.3, 3.0, -0.5, 0.5, GLS);
@@ -168,6 +211,7 @@ function loTractor() {
     vb.box(7.0, 7.14, 1.25, 1.55, s * 0.78 - 0.15, s * 0.78 + 0.15, HEAD);
     vb.box(7.05, 7.16, 1.08, 1.18, s * 0.93 - 0.07, s * 0.93 + 0.07, AMBER);
     vb.box(-2.0, -1.94, 0.88, 1.04, s * 0.8 - 0.12, s * 0.8 + 0.12, TAIL);
+    vb.box(-2.0, -1.94, 0.74, 0.84, s * 0.8 - 0.08, s * 0.8 + 0.08, REVERSE);
     wheelLo(vb, T.steerX, T.tyreR, s * T.steerTrack, T.tyreR, T.tyreW + 0.05);
     for (const x of T.driveX) wheelLo(vb, x, T.tyreR, s * T.driveTrack, T.tyreR, 0.62);
   }
@@ -184,6 +228,7 @@ function loTrailer(type, cargo = 'lumber') {
     for (const x of ax) wheelLo(vb, x, T.tyreR, s * T.track, T.tyreR, 0.62);
     vb.box(T.rearX - 0.05, T.rearX + 0.02, 1.45, 1.65, s * 1.0 - 0.2, s * 1.0 + 0.2, TAIL);
     vb.box(T.rearX - 0.05, T.rearX + 0.02, 1.25, 1.33, s * 1.15 - 0.08, s * 1.15 + 0.08, AMBER);
+    vb.box(T.rearX - 0.05, T.rearX + 0.02, 1.05, 1.18, s * 1.0 - 0.15, s * 1.0 + 0.15, REVERSE);
   }
   vb.box(T.rearX - 0.15, T.rearX, 0.62, 0.86, -1.2, 1.2, FRAME);
   const x0 = T.rearX + 0.04, x1 = T.frontX;

@@ -22,13 +22,18 @@ const ring = (xs, r) => xs.map((x) => [x, r]);
 export const KINDS = {
   sedan: { cls: 'car', len: 4.72, w: 1.8, front: 2.4, rear: 2.4, mass: 1500, a: 1.8, b: 2.2, T: 1.4, s0: 2.4, vmul: 1.0, aLat: 2.8, circles: ring([-1.35, 0, 1.35], 1.05) },
   suv: { cls: 'car', len: 4.78, w: 1.86, front: 2.4, rear: 2.4, mass: 2100, a: 1.6, b: 2.1, T: 1.5, s0: 2.5, vmul: 0.99, aLat: 2.5, circles: ring([-1.35, 0, 1.35], 1.1) },
-  hatch: { cls: 'car', len: 4.05, w: 1.7, front: 2.05, rear: 2.05, mass: 1200, a: 1.9, b: 2.3, T: 1.3, s0: 2.3, vmul: 1.0, aLat: 2.8, circles: ring([-1.1, 1.1], 1.0) },
+  hatch: { cls: 'car', len: 4.05, w: 1.7, front: 2.05, rear: 2.05, mass: 1200, a: 1.9, b: 2.3, T: 1.3, s0: 2.3, vmul: 1.0, aLat: 2.8, circles: ring([-1.1, 0, 1.1], 1.0) },
   van: { cls: 'car', len: 5.9, w: 1.96, front: 3.0, rear: 3.0, mass: 2600, a: 1.3, b: 2.0, T: 1.6, s0: 2.8, vmul: 0.95, aLat: 2.2, circles: ring([-2.0, -0.6, 0.8, 2.1], 1.1) },
   pickup: { cls: 'car', len: 5.9, w: 1.94, front: 3.0, rear: 3.0, mass: 2800, a: 1.5, b: 2.1, T: 1.5, s0: 2.7, vmul: 1.02, aLat: 2.4, circles: ring([-2.0, -0.6, 0.8, 2.1], 1.1) },
   rv: { cls: 'heavy', len: 8.4, w: 2.4, front: 4.2, rear: 4.2, mass: 6500, a: 0.9, b: 1.8, T: 1.9, s0: 3.5, vmul: 0.82, aLat: 1.8, circles: ring([-3.0, -1.0, 1.0, 3.0], 1.3) },
   bus: { cls: 'heavy', len: 12.2, w: 2.55, front: 6.1, rear: 6.1, mass: 14000, a: 0.9, b: 1.8, T: 1.8, s0: 4, vmul: 0.92, aLat: 1.8, circles: ring([-4.6, -2.3, 0, 2.3, 4.6], 1.35) },
   // articulated: the reference point is the middle of the drive tandem; the trailer is separate
   semi: { cls: 'heavy', len: 22.6, w: 2.6, front: 7.35, rear: 15.3, mass: 26000, a: 0.7, b: 1.5, T: 2.1, s0: 4, vmul: 0.9, aLat: 1.5, circles: ring([-1.2, 1.2, 3.4, 5.4, 7.0], 1.3), trailerCircles: ring([1.5, 4.5, 7.5, 10.5, 13.5, 15.4], 1.35) },
+  // Emergency and service fleet
+  police: { cls: 'car', len: 4.95, w: 1.9, front: 2.5, rear: 2.45, mass: 1950, a: 2.2, b: 2.6, T: 1.2, s0: 2.2, vmul: 1.15, aLat: 3.2, isEmergency: true, emergencyType: 'police', circles: ring([-1.4, 0, 1.4], 1.1) },
+  ambulance: { cls: 'car', len: 6.5, w: 2.2, front: 3.2, rear: 3.3, mass: 4200, a: 1.5, b: 2.2, T: 1.4, s0: 2.6, vmul: 1.08, aLat: 2.4, isEmergency: true, emergencyType: 'ambulance', circles: ring([-2.2, -0.7, 0.8, 2.2], 1.2) },
+  tow: { cls: 'heavy', len: 7.8, w: 2.4, front: 3.8, rear: 4.0, mass: 6800, a: 1.1, b: 2.0, T: 1.7, s0: 3.2, vmul: 0.98, aLat: 2.0, isEmergency: true, emergencyType: 'tow', circles: ring([-2.6, -0.9, 0.9, 2.6], 1.3) },
+  classic_van: { cls: 'car', len: 4.6, w: 1.85, front: 2.3, rear: 2.3, mass: 1800, a: 1.4, b: 2.0, T: 1.6, s0: 2.6, vmul: 0.94, aLat: 2.2, circles: ring([-1.3, 0, 1.3], 1.05) },
 };
 export const SEMI_HITCH = 0.15; // kingpin ahead of the drive tandem centre
 export const SEMI_KING_TO_AXLE = 12.2;
@@ -46,6 +51,33 @@ export const CLASS_SPEED = { interstate: 33, highway: 28, county: 23, gravel: 14
 /** Vehicles per km used to weight where traffic appears. */
 export const CLASS_DENSITY = { interstate: 9, highway: 5, county: 1.8, gravel: 0.35, dirt: 0.08, street: 0 };
 export const classSpeed = (cls) => CLASS_SPEED[cls] ?? 15;
+
+/** Scale target speed based on weather and road surface grip: rain -15%, snow -35%, ice -60%. */
+export function weatherSpeedFactor(seasonState, cls, surfaceKey) {
+  const sk = typeof surfaceKey === 'string' ? surfaceKey.toLowerCase() : '';
+  if (sk === 'ice') return 0.4;
+  if (sk === 'snow' || sk === 'packed' || sk === 'plowed') return 0.65;
+  if (sk === 'wet' || sk === 'rain') return 0.85;
+
+  if (typeof seasonState === 'string') {
+    const s = seasonState.toLowerCase();
+    if (s.includes('ice')) return 0.4;
+    if (s.includes('snow') || s === 'winter') return 0.65;
+    if (s.includes('rain') || s === 'wet') return 0.85;
+    return 1.0;
+  }
+
+  if (seasonState && typeof seasonState === 'object') {
+    const ice = seasonState.u?.uIce?.value ?? seasonState.ice ?? (seasonState.key === 'winter' ? 0.3 : 0);
+    const wet = seasonState.u?.uWet?.value ?? seasonState.wet ?? (seasonState.key === 'rain' ? 1.0 : 0);
+    const snowy = seasonState.snowy || seasonState.key === 'winter' || seasonState.snow;
+    if (ice > 0.25) return 0.4;
+    if (snowy) return 0.65;
+    if (wet > 0.25) return 0.85;
+  }
+
+  return 1.0;
+}
 
 /** Share of each vehicle kind by road class. */
 export const SPAWN_MIX = {
@@ -86,13 +118,17 @@ export const isMultiLane = (cls) => cls === 'interstate';
 /**
  * Intelligent Driver Model acceleration. gap = bumper-to-bumper distance to the leader (use 1e9 for
  * none), vLead its speed along our direction (negative when it is oncoming), v0 the desired speed.
+ * Headway T and braking b adapt to road surface friction mu.
  */
-export function idmAccel(p, v, gap, vLead, v0) {
+export function idmAccel(p, v, gap, vLead, v0, mu = 1.05) {
   const vv = Math.max(0, v);
   const free = 1 - Math.pow(vv / Math.max(0.5, v0), 4);
   if (!(gap < 1e8)) return clamp(p.a * free, -p.bMax, p.a);
   const dv = vv - vLead;
-  const sStar = p.s0 + Math.max(0, vv * p.T + (vv * dv) / (2 * Math.sqrt(p.a * p.b)));
+  const friction = Math.max(0.1, Math.min(1.0, mu / 1.05));
+  const T = p.T * (1 + (1 - friction) * 0.8);
+  const b = Math.max(0.4, p.b * (0.4 + 0.6 * friction));
+  const sStar = p.s0 + Math.max(0, vv * T + (vv * dv) / (2 * Math.sqrt(p.a * b)));
   const g = Math.max(0.15, gap);
   return clamp(p.a * (free - (sStar / g) * (sStar / g)), -p.bMax, p.a);
 }
@@ -116,16 +152,17 @@ export function polylineCurvature(xs, zs, n, step) {
   return out;
 }
 
-/** Highest safe speed now, given curves in the next `look` metres (braking at b into each one). */
-export function curveSpeedAhead(curv, step, s, dir, look, aLat, b, vFloor = 6) {
+/** Highest safe speed now, given curves in the next `look` metres (braking at b into each one). Scale aLat by mu / 1.05. */
+export function curveSpeedAhead(curv, step, s, dir, look, aLat, b, vFloor = 6, mu = 1.05) {
   const n = curv.length;
   let best = Infinity;
+  const effectiveALat = aLat * (mu / 1.05);
   for (let d = 0; d <= look; d += step) {
     const k = Math.round((s + dir * d) / step);
     if (k < 0 || k >= n) break;
     const kap = curv[k];
     if (kap < 1 / 1200) continue;
-    const vc = Math.max(vFloor, Math.sqrt(aLat / kap));
+    const vc = Math.max(vFloor, Math.sqrt(effectiveALat / kap));
     const lim = approachLimit(vc, d, b);
     if (lim < best) best = lim;
   }

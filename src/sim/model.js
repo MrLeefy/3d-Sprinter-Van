@@ -38,6 +38,7 @@ export function defaultControls() {
     useSchedule: true,
     manualLoads: {}, // id → level index (overrides schedule)
     occupants: 2,
+    boondock: null, // Boondocking site ratings: { solarExposure, windShelter, levelness }
   };
 }
 
@@ -90,9 +91,9 @@ function batteryVoltage(soc, amps) {
 export function step(state, scn, ctrl, dt = 60) {
   const day = Math.floor(state.t / 24);
   const hour = state.t - day * 24;
-  const wx = weatherAt(scn, day, hour);
+  const wx = scn.wxDirect || weatherAt(scn, day, hour);
   const night = isNight(hour);
-  const act = ctrl.useSchedule ? scheduleAt(hour) : null;
+  const act = ctrl.useSchedule ? (scn.schDirect !== undefined ? scn.schDirect : scheduleAt(hour)) : null;
   const driveH = scn.driveHours ? scn.driveHours[Math.min(day, scn.driveHours.length - 1)] || 0 : 0;
   const driving = ctrl.driving || (ctrl.useSchedule && driveH > 0 && hour >= 13 && hour < 13 + driveH);
   const occ = act ? (driving ? 2 : act.occ) * (ctrl.occupants / 2) : ctrl.occupants;
@@ -141,24 +142,32 @@ export function step(state, scn, ctrl, dt = 60) {
   if (cl.mode === 'vent' && lv.fanMain < 2) lv.fanMain = 2;
   const exhaust = VENT_RATES.fanMain[lv.fanMain] + VENT_RATES.fanBath[lv.fanBath] + VENT_RATES.hood[lv.hood];
   const supply = VENT_RATES.freshFan[lv.freshFan];
+  // ── Boondocking site characteristics (solar exposure, wind shelter, levelness) ─
+  const boondock = ctrl.boondock || ctrl.campSpot || ctrl.site || state.boondock || null;
+  const solarFactor = boondock != null ? Math.max(0, Math.min(1, boondock.solarExposure ?? boondock.solarRating ?? 1)) : 1;
+  const windShelterFactor = boondock != null ? Math.max(0, Math.min(1, boondock.windShelter ?? boondock.windRating ?? 0)) : 0;
+  const levelnessVal = boondock != null ? Math.max(0, Math.min(1, boondock.levelness ?? boondock.levelnessRating ?? 1)) : 1;
+  const effectiveWind = wx.wind * (1 - 0.7 * windShelterFactor);
+
   // An open sliding or rear door exchanges roughly 500–900 m³/h depending on wind
-  const doorM3h = (ctrl.doorsOpen || 0) * (500 + 80 * wx.wind);
+  const doorM3h = (ctrl.doorsOpen || 0) * (500 + 80 * effectiveWind);
   const ventM3h = Math.max(exhaust, supply) + (driving ? 60 : 0) + doorM3h;
-  const infM3h = AIR.infiltrationACH * AIR.volumeM3 * (1 + wx.wind * 0.05);
+  const infM3h = AIR.infiltrationACH * AIR.volumeM3 * (1 + effectiveWind * 0.05);
   const totalAir = ventM3h + infM3h;
 
   // ── Thermal balance ───────────────────────────────────────────
   const ua = envelopeUA({ covers, podOut }).total;
   const Qcond = ua * (wx.T - state.Tin);
   const Qair = ventWK(totalAir) * (wx.T - state.Tin);
-  const sol = solarGains(wx.ghi, covers);
+  const sol = solarGains(wx.ghi * solarFactor, covers);
   const peopleW = occ * PEOPLE.sensibleW[metab];
 
   // Requested load powers before climate control
   const req = {};
   for (const l of LOADS) req[l.id] = levelW(l.id, lv[l.id]);
   req.monitor = 6;
-  req.fridge = lv.fridge ? 18 * (1 + 0.035 * (state.Tin - 25)) + (state.Tin > 30 ? 4 : 0) : 0;
+  const tiltFridgeMult = levelnessVal < 0.7 ? 1 + 0.25 * ((0.7 - levelnessVal) / 0.7) : 1;
+  req.fridge = lv.fridge ? (18 * (1 + 0.035 * (state.Tin - 25)) + (state.Tin > 30 ? 4 : 0)) * tiltFridgeMult : 0;
   req.greyHeat = wx.T < 2 && lv.greyHeat ? Math.min(60, 60 * (0.25 + 0.035 * (2 - wx.T))) : 0;
   req.pump = 0; // computed from water draw
 
@@ -345,8 +354,9 @@ export function step(state, scn, ctrl, dt = 60) {
   // Sources
   let solarW = 0;
   if (ctrl.solar && wx.ghi > 0) {
-    const Tcell = wx.T + 0.03 * wx.ghi;
-    solarW = SOURCES.solar.wp * (wx.ghi / 1000) * SOURCES.solar.derate * (1 - 0.004 * Math.max(0, Tcell - 25));
+    const effGhi = wx.ghi * solarFactor;
+    const Tcell = wx.T + 0.03 * effGhi;
+    solarW = SOURCES.solar.wp * (effGhi / 1000) * SOURCES.solar.derate * (1 - 0.004 * Math.max(0, Tcell - 25));
     solarW = Math.min(solarW, SOURCES.solar.mpptMaxA * 14.0);
     if (scn.weather[Math.min(day, scn.weather.length - 1)].snow > 0.3 && hour < 11) solarW *= 0.2; // snow on panels until cleared
   }
@@ -411,6 +421,10 @@ export function step(state, scn, ctrl, dt = 60) {
     soc: state.soc, shed, dead, byLoad, levels: lv,
     freshL: state.freshL, greyL: state.greyL, boilerT: state.boilerT, urineL: state.urineL, waterOk, drawL, freezeRisk,
     peakDcA: (dcW + invIn) / V,
+    boondock: boondock ? { ...boondock, solarExposure: solarFactor, windShelter: windShelterFactor, levelness: levelnessVal } : null,
+    effectiveWind,
+    levelness: levelnessVal,
+    unlevel: levelnessVal < 0.65,
   };
 }
 
@@ -484,3 +498,36 @@ export function endurance(scn, ctrlOverrides = {}, maxDays = 10) {
     run: r,
   };
 }
+
+/**
+ * Step the camper model forward with optional direct weather and schedule overrides.
+ */
+export function stepModel(state, ctrl, dt = 60, wx = null, sch = null) {
+  const scn = {
+    id: 'step_model',
+    days: 30,
+    weather: [{ Tmin: wx?.T ?? 20, Tmax: wx?.T ?? 20, rhMin: wx?.rh ?? 50, rhMax: wx?.rh ?? 50, ghiPeak: wx?.ghi ?? 500, sunrise: 6, sunset: 18, cloud: 0, rain: 0, snow: 0, wind: wx?.wspd ?? wx?.wind ?? 2 }],
+    wxDirect: wx ? {
+      T: wx.T ?? 20,
+      rh: wx.rh ?? 50,
+      ghi: wx.ghi ?? 0,
+      wind: wx.wspd ?? wx.wind ?? 2,
+      cloud: wx.cloud ?? 0,
+      rain: wx.rain ?? 0,
+      snow: wx.snow ?? 0,
+    } : null,
+    schDirect: sch,
+    climate: {},
+  };
+
+  const stepSize = Math.min(dt, 60);
+  let elapsed = 0;
+  let lastSnap = null;
+  while (elapsed < dt) {
+    const curDt = Math.min(stepSize, dt - elapsed);
+    lastSnap = step(state, scn, ctrl, curDt);
+    elapsed += curDt;
+  }
+  return lastSnap;
+}
+

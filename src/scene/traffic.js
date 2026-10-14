@@ -66,11 +66,13 @@ const makeScan = () => ({
   onc: { gap: BIG, v: 0 }, // nearest oncoming thing (v = speed towards us)
   fol: { gap: BIG, v: 0, ref: null }, // nearest same-direction follower behind
   pb: { gap: BIG, v: 0 }, // the player behind us in our lane
+  emergBehind: null, // nearest emergency vehicle approaching from behind
 });
 function resetScan(o) {
   o.lead.gap = o.same.gap = o.onc.gap = o.fol.gap = o.pb.gap = BIG;
   o.lead.ref = o.same.ref = o.fol.ref = null;
   o.lead.v = o.same.v = o.onc.v = o.fol.v = o.pb.v = 0;
+  o.emergBehind = null;
   return o;
 }
 
@@ -341,6 +343,11 @@ export class Traffic {
           fol.v = R.stat ? 0 : R.v;
           fol.ref = o;
         }
+        if (R.K?.isEmergency && !K?.isEmergency && gap < 120) {
+          if (!out.emergBehind || gap < out.emergBehind.gap) {
+            out.emergBehind = { gap, v: R.stat ? 0 : R.v, ref: o };
+          }
+        }
       }
     }
     // what is just beyond the junction we are about to drive through
@@ -429,7 +436,11 @@ export class Traffic {
   // ── Per-vehicle update ─────────────────────────────────────────────────────
   updateLimits(v, D) {
     const e = v.e, W = this.world.gen;
-    v.curveLim = S.curveSpeedAhead(curvOf(e), stepOf(e), v.s, v.dir, 260, v.K.aLat * (0.9 + 0.2 * v.temper), 1.5);
+    const surf = this.land?.surfaceAt ? this.land.surfaceAt(v.x, v.z) : null;
+    const mu = surf?.mu ?? 1.05;
+    v.surfaceMu = mu;
+    v.surfaceKey = surf?.key;
+    v.curveLim = S.curveSpeedAhead(curvOf(e), stepOf(e), v.s, v.dir, 260, v.K.aLat * (0.9 + 0.2 * v.temper), 1.5, 6, mu);
     let td = Infinity;
     for (const d of [90, 170, 270, 390]) {
       sampleEdge(e, v.s + v.dir * d);
@@ -457,8 +468,19 @@ export class Traffic {
     if (v.mode !== 'cruise' || v.wreck > 0 || v.e.conn || this.remain(v) < 220) return;
     const e = v.e, cls = e.cls, K = v.K;
     const lanes = S.laneLats(cls, e.P.width), multi = S.isMultiLane(cls);
-    if (!multi && (cls === 'gravel' || cls === 'dirt')) return;
     const own = v.ownScan, t = this.tgt;
+    // Move over if an emergency vehicle approaches from behind
+    if (own?.emergBehind && own.emergBehind.gap < 100 && !K.isEmergency) {
+      if (multi && v.lane === 0) {
+        v.pendingLat = lanes[1];
+        v.pendingSide = 1;
+        v.mode = 'signal';
+        v.signal = 1;
+        v.sigT = 0.4;
+        return;
+      }
+    }
+    if (!multi && (cls === 'gravel' || cls === 'dirt')) return;
     const hw = K.w / 2 + 0.15;
     const inner = multi ? v.lane === 0 : v.opp;
     let latT, side = 0;
@@ -649,11 +671,46 @@ export class Traffic {
     const K = v.K, out = this._jr || (this._jr = { cap: Infinity, hold: null });
     const onC = v.e === c;
     const zoneStart = c.merge ? 0 : Math.max(0, c.mid - ZONE); // a lane merge is settled at the port, a crossing in the middle
-    const dZ = onC ? zoneStart - v.s : toEnd + zoneStart;
+    const dZ = onC ? zoneStart - v.s : toEnd;
     out.hold = null;
     out.cap = Infinity;
     if (!onC && c.turn !== 'straight') out.cap = S.approachLimit(K.cls === 'heavy' ? 4.5 : 6.5, toEnd + c.divS - 4, 1.9);
     if (v.res || dZ < -K.front) return out;
+
+    // Traffic signal check for signalized town intersections
+    const node = c.node;
+    const isSignalized = Boolean(node && (node.kind === 'town' || node.kind === 'city' || node.signalized));
+    let signalRed = false;
+    if (isSignalized) {
+      const axis = (c.inSide === 'E' || c.inSide === 'W') ? 'X' : 'Z';
+      const sig = J.trafficSignalPhase(node, node.x, node.z, this.clock, axis);
+      v.signalPhase = sig.phase;
+      // Facing red or late yellow
+      const lateYellow = sig.phase === 'yellow' && (sig.timeRemaining <= 2.2 || dZ > (v.v * v.v) / (2 * (v.p?.b || 2.0)));
+      if (sig.phase === 'red' || lateYellow) {
+        signalRed = true;
+      }
+    }
+
+    if (signalRed) {
+      const dStop = onC ? Math.max(0, zoneStart - v.s) : toEnd;
+      const stopLook = Math.max(140, (v.v * v.v) / 2.5 + 40);
+      if (dStop < stopLook) {
+        out.hold = Math.max(0, dStop - K.front - 6);
+        if (v.v < 0.5) v.waitT += dt;
+        if (!v.waiting) {
+          v.waiting = true;
+          this.stats.waits++;
+        }
+        if (!onC && v.res) {
+          this.resv.delete(v);
+          v.res = null;
+        }
+        return out;
+      }
+      return out;
+    }
+
     const reqDist = (v.v * v.v) / 9 + 15 + K.front;
     if (dZ >= Math.max(40, reqDist)) return out;
     const eta = Math.max(0, dZ) / Math.max(v.v, 2);
@@ -691,7 +748,38 @@ export class Traffic {
 
   /** May this vehicle drive into the crossing area now? Not while a crossing movement is in use or a bigger road's traffic is close. */
   mayEnter(v, c, eta, D, horizon = 6) {
-    const me = { rank: c.rankIn, eta, id: v.id, holds: false };
+    const me = { rank: c.rankIn, eta, id: v.id, holds: false, isEmergency: Boolean(v.K?.isEmergency), waitT: v.waitT };
+    const node = c.node;
+    const isSignalized = Boolean(node && (node.kind === 'town' || node.kind === 'city' || node.signalized));
+
+    // Anti-deadlock priority breaker: if waitT > 6.0s at junction, grant reservation to longest-waiting vehicle
+    if (v.waitT > 6.0) {
+      let longestWaiting = true;
+      for (const o of this.vehicles) {
+        if (o === v || o.free) continue;
+        const z = this.zoneEta(o, c.node);
+        if (!z) continue;
+        if (o.res && o.res.node === c.node) {
+          const conflicts = this.conflict(o.res, c, v.K.cls === 'heavy' || o.K.cls === 'heavy');
+          if (conflicts) {
+            const isStalled = o.v < 0.3 && (o.waitT ?? 0) > 4.0;
+            if (!isStalled) {
+              longestWaiting = false;
+              break;
+            }
+          }
+        }
+        if (o.waitT > v.waitT || (o.waitT === v.waitT && o.id < v.id)) {
+          longestWaiting = false;
+          break;
+        }
+      }
+      if (longestWaiting) {
+        v.blockedBy = null;
+        return true;
+      }
+    }
+
     for (const o of this.vehicles) {
       if (o === v || o.free) continue;
       const z = this.zoneEta(o, c.node);
@@ -699,7 +787,15 @@ export class Traffic {
       const oc = z.c, holds = !!o.res && o.res.node === c.node;
       // the same movement only matters when it comes from the other lane of a multi-lane road: both lanes squeeze into one
       if (oc === c ? !(c.merge && o.lane !== v.lane && (o.e === v.e || (o.e === c && o.s < 80))) : !this.conflict(oc, c, v.K.cls === 'heavy' || o.K.cls === 'heavy')) continue;
-      if (J.mustYield(me, { rank: oc.rankIn, eta: holds ? 0 : z.eta, id: o.id, holds }, horizon)) {
+
+      // In signalized intersections, do NOT yield to a conflicting vehicle stopped at a RED light (unless they already hold reservation)
+      if (isSignalized && !holds) {
+        const oAxis = (oc.inSide === 'E' || oc.inSide === 'W') ? 'X' : 'Z';
+        const oSig = J.trafficSignalPhase(node, node.x, node.z, this.clock, oAxis);
+        if (oSig.phase === 'red') continue;
+      }
+
+      if (J.mustYield(me, { rank: oc.rankIn, eta: holds ? 0 : z.eta, id: o.id, holds, isEmergency: Boolean(o.K?.isEmergency), waitT: o.waitT }, horizon)) {
         v.blockedBy = o;
         return false;
       }
@@ -725,6 +821,7 @@ export class Traffic {
       return;
     }
     const ne = nx.e, K = v.K, prev = v.e;
+    if (ne.conn && !v.res) return;
     v.next = undefined;
     v.e = ne;
     v.dir = nx.dir;
@@ -760,7 +857,20 @@ export class Traffic {
     if (v.free) return this.stepWreck(v, dt, D);
     // reached the end of the road last frame: carry on through the junction onto the next road
     const rem = this.remain(v);
-    if (rem <= 0 && !v.arrive) this.transfer(v, -rem);
+    if (rem <= 0 && !v.arrive) {
+      if (v.next && v.next.e && v.next.e.conn && !v.res) {
+        v.v = 0;
+        v.a = Math.min(v.a, 0);
+        v.s = v.dir > 0 ? v.e.len : 0;
+        v.waitT += dt;
+        if (!v.waiting) {
+          v.waiting = true;
+          this.stats.waits++;
+        }
+      } else {
+        this.transfer(v, -rem);
+      }
+    }
     const e = v.e, K = v.K, cls = e.cls, multi = S.isMultiLane(cls);
     // limits (curves, towns, road end) refreshed a few times a second
     v.limT -= dt;
@@ -784,12 +894,24 @@ export class Traffic {
       endLim = Math.min(endLim, j.cap);
       hold = j.hold;
     }
-    let v0 = Math.min(v.vmax * (v.push && v.opp ? 1.15 : 1), v.curveLim, v.townLim, endLim, this.wreckLimit(v));
+    // Turn signals before turning connector
+    if (jc && jc.turn && jc.turn !== 'straight' && toEnd <= 50 && toEnd > 0) {
+      if (v.mode === 'cruise') v.signal = jc.turn === 'left' ? -1 : 1;
+    } else if (e.conn && (e.turn === 'left' || e.turn === 'right')) {
+      if (v.mode === 'cruise') v.signal = e.turn === 'left' ? -1 : 1;
+    }
+    const wFactor = S.weatherSpeedFactor(this.land?.season, cls, v.surfaceKey);
+    let v0 = Math.min(v.vmax * wFactor * (v.push && v.opp ? 1.15 : 1), v.curveLim, v.townLim, endLim, this.wreckLimit(v));
     // perceive
     const hw = K.w / 2 + 0.1;
     const own = this.scan(v, v.lat - hw, v.lat + hw, v.ownScan || (v.ownScan = makeScan()), 420, true);
     let lead = own.lead;
     if (hold !== null && hold < lead.gap) lead = { gap: hold, v: 0, ref: null, len: 0 }; // the stop line is a wall until the junction is free
+    // Emergency vehicle approaching from behind: slow down or pull over
+    if (own.emergBehind && own.emergBehind.gap < 80 && !K.isEmergency) {
+      v0 = Math.min(v0, Math.max(6, own.emergBehind.v * 0.55));
+      if (!multi && v.mode === 'cruise') v.lat = Math.min(v.latHome + 0.6, e.P.width * 0.44);
+    }
     if (v.mode === 'signal' || v.mode === 'change') {
       // while moving over, watch the leader in the lane we are heading for as well
       const lt = v.mode === 'signal' ? v.pendingLat : v.latTo;
@@ -802,7 +924,7 @@ export class Traffic {
     }
     if (v.abort && v.passLead && v.passLead !== PLAYER && v.passLead.v !== undefined) v0 = Math.min(v0, Math.max(0, v.passLead.v - 3));
     else if (v.abort && v.passLead === PLAYER) v0 = Math.min(v0, Math.max(0, own.same.v - 3));
-    let acc = S.idmAccel(v.p, v.v, lead.gap, lead.v, v0);
+    let acc = S.idmAccel(v.p, v.v, lead.gap, lead.v, v0, v.surfaceMu ?? 1.05);
     if (v.wreck > 0) {
       v.wreck -= dt;
       acc = -6;

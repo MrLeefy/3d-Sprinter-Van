@@ -7,10 +7,11 @@ import { WATER } from '../data/plumbing.js';
 import { hash2 } from '../world/noise.js';
 import { layoutOf } from '../world/layout.js';
 import { S } from '../world/gen.js';
+import { campsNear, BOONDOCK_TYPES } from '../world/camp.js';
 
 const KEY = 'sprinter-wallet';
 const GAL = 3.78541;
-const ICON = { fuel: '⛽', water: '🚰', dump: '♻', camp: '⛺', shop: '🛒' };
+const ICON = { fuel: '⛽', water: '🚰', dump: '♻', camp: '⛺', shop: '🛒', boondock: '🌲' };
 
 export const money = (v) => `$${Math.round(v).toLocaleString('en-US')}`;
 
@@ -32,6 +33,7 @@ export class Services {
     this.camp = null;
     this.campGone = 0;
     this.lowWarned = false;
+    this.boondocked = new Set();
     this.stats = { fuelL: 0, spent: 0, water: 0, dumps: 0, nights: 0 };
     this.el = document.createElement('div');
     this.el.className = 'dh-svc';
@@ -123,13 +125,19 @@ export class Services {
     this.t = 0.3;
     const slow = Math.abs(D.v) < 5;
     const zs = slow ? this.ui.world.terrain.towns.zonesNear(D.x, D.z, 30).filter((z) => z.d <= z.r + 6) : [];
+    if (slow && zs.length === 0) {
+      for (const b of campsNear(this.W, D.x, D.z, 26)) {
+        const bt = BOONDOCK_TYPES[b.category] || { icon: '🌲', label: 'Boondock' };
+        zs.push({ ...b, type: 'boondock', icon: bt.icon, node: { name: bt.label, kind: 'boondock' } });
+      }
+    }
     const sig = zs.map((z) => `${z.type}${Math.round(z.x)}${Math.round(z.z)}`).join('|');
     if (sig !== this.shown) {
       this.shown = sig;
       this.render(zs);
     } else this.refresh();
     // leaving a campground ends the hookup
-    if (this.camp && !zs.some((z) => z.type === 'camp')) {
+    if (this.camp && !zs.some((z) => z.type === 'camp' || z.type === 'boondock')) {
       this.campGone += 0.3;
       if (this.campGone > 3) {
         if (this.camp.hookups) A.ctrl.shore.connected = false;
@@ -165,7 +173,7 @@ export class Services {
     this.zs = zs;
     this.el.innerHTML = zs
       .map((z, i) => {
-        const hdr = `<div class="sv-h"><span>${ICON[z.type] || ''}</span><b>${z.name || z.type}</b><em>${z.node.name}</em></div>`;
+        const hdr = `<div class="sv-h"><span>${z.icon || ICON[z.type] || ''}</span><b>${z.name || z.type}</b><em>${z.node.name}</em></div>`;
         return `<div class="sv-card" data-i="${i}">${hdr}<div class="sv-b">${this.body(z)}</div></div>`;
       })
       .join('');
@@ -191,6 +199,13 @@ export class Services {
       return paid
         ? `<p>Checked in${z.hookups ? ' — shore power connected' : ' — dry camping'}. Sleep well; the master slider deploys the camp.</p>`
         : `<p>${money(fee)}/night${z.hookups ? ' with electric hookup (shore power)' : ' · dry camping, no hookups'}.</p><div class="sv-btns"><button class="dh-btn primary" data-act="camp">Check in · ${money(fee)}</button></div>`;
+    }
+    if (z.type === 'boondock') {
+      const active = this.camp && this.camp.key === `${z.x},${z.z}`;
+      const ratings = `☀ Solar ${Math.round(z.solarExposure * 100)}% · 🌬 Wind shelter ${Math.round(z.windShelter * 100)}% · 📐 Level ${Math.round(z.levelness * 100)}%`;
+      return active
+        ? `<p>${ratings}<br>Camped off-grid — solar array and LiFePO₄ house bank active.</p>`
+        : `<p>${ratings}</p><div class="sv-btns"><button class="dh-btn primary" data-act="boondock">Boondock here · Free</button></div>`;
     }
     if (z.type === 'shop') {
       return `<p>Stock up for the road.</p><div class="sv-btns"><button class="dh-btn primary" data-act="groceries">Groceries · $65</button><button class="dh-btn" data-act="coffee">Coffee · $4</button></div>`;
@@ -222,7 +237,7 @@ export class Services {
   onUse() {
     const z = this.zs?.[0];
     if (!z) return;
-    const a = { fuel: 'fill', water: 'water', dump: 'dump', camp: 'camp', shop: 'groceries' }[z.type];
+    const a = { fuel: 'fill', water: 'water', dump: 'dump', camp: 'camp', boondock: 'boondock', shop: 'groceries' }[z.type];
     if (a) this.act(z, a);
   }
 
@@ -275,6 +290,18 @@ export class Services {
       this.ui.passport?.log(`Camped at ${this.camp.name} (${money(fee)})`);
       this.ui.passport?.achieve?.('camp');
       A.toast(z.hookups ? `Checked in. Shore power connected — the battery will top up and the heat pump or heater can run on the grid.` : 'Checked in for dry camping — solar and the alternator are your power.');
+      this.shown = '';
+    } else if (a === 'boondock') {
+      const key = `${z.x},${z.z}`;
+      this.camp = { key, name: z.name, hookups: false };
+      this.stats.nights++;
+      if (!this.boondocked.has(z.id)) {
+        this.boondocked.add(z.id);
+        this.earn(35, `Discovered off-grid spot: ${z.name}`);
+      }
+      this.ui.passport?.log(`Boondocked at ${z.name} (Solar ${Math.round(z.solarExposure * 100)}%, Wind ${Math.round(z.windShelter * 100)}%)`);
+      this.ui.passport?.achieve?.('camp');
+      A.toast(`Boondocking at ${z.name} — ☀ ${Math.round(z.solarExposure * 100)}% solar · 🌬 ${Math.round(z.windShelter * 100)}% wind shelter · 📐 ${Math.round(z.levelness * 100)}% level.`);
       this.shown = '';
     } else if (a === 'groceries') {
       if (!this.pay(65, 'groceries')) return;

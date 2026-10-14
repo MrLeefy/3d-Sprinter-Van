@@ -71,16 +71,7 @@ export function drawFurniture(gb, atlas, p, y) {
       gb.box(x - 0.08, x + 0.08, z - 0.08, z + 0.08, y, y + 5.6, DARK, K.plain, 6, DARK);
       const ex = x + ax * reach, ez = z + az * reach;
       gb.box(Math.min(x, ex) - 0.05, Math.max(x, ex) + 0.05, Math.min(z, ez) - 0.05, Math.max(z, ez) + 0.05, y + 5.0, y + 5.12, DARK, K.plain, 6, DARK);
-      lb(gb, ex, ez, f, -0.17, 0.17, -0.19, 0.19, y + 3.9, y + 5.0, DARK);
-      const lens = (h, col, on) => {
-        const u = 0.175, v = 0.11;
-        const P = (vv, yy) => [ex + f[0] * u + t[0] * vv, yy, ez + f[1] * u + t[1] * vv];
-        gb.quad(P(-v, h), P(v, h), P(v, h + 0.22), P(-v, h + 0.22), [f[0], 0, f[1]], on ? col : col.map((q) => q * 0.08), on ? K.glow : K.plain, 7);
-      };
-      const st = a; // 0 green, 1 red
-      lens(y + 4.72, lin([1, 0.05, 0.03]), st === 1);
-      lens(y + 4.44, lin([1, 0.65, 0.05]), false);
-      lens(y + 4.16, lin([0.1, 1, 0.25]), st === 0);
+      drawSignalHead(gb, ex, ez, f, t, y, a);
       break;
     }
     case 'stop': {
@@ -153,3 +144,24 @@ export function drawRail(gb, x0, x1, az, y) {
   for (let x = Math.ceil(x0 / 0.85) * 0.85; x < x1; x += 0.85) gb.box(x - 0.13, x + 0.13, az - 1.4, az + 1.4, y + 0.06, y + 0.16, tie, K.plain, 15, tie);
   for (const s of [-0.72, 0.72]) gb.box(x0, x1, az + s - 0.06, az + s + 0.06, y + 0.16, y + 0.34, iron, K.plain, 15, iron);
 }
+
+/**
+ * Render dynamic 3-lens signal head activating green, yellow, and red lenses according to phase.
+ */
+export function drawSignalHead(gb, ex, ez, f, t, y, phase) {
+  lb(gb, ex, ez, f, -0.17, 0.17, -0.19, 0.19, y + 3.9, y + 5.0, DARK);
+  const lens = (h, col, on) => {
+    const u = 0.175, v = 0.11;
+    const P = (vv, yy) => [ex + f[0] * u + t[0] * vv, yy, ez + f[1] * u + t[1] * vv];
+    gb.quad(P(-v, h), P(v, h), P(v, h + 0.22), P(-v, h + 0.22), [f[0], 0, f[1]], on ? col : col.map((q) => q * 0.08), on ? K.glow : K.plain, 7);
+  };
+  const code = (phase && typeof phase === 'object') ? phase.code : phase;
+  const phaseStr = (phase && typeof phase === 'object') ? phase.phase : phase;
+  const isRed = phase === 2 || code === 2 || phase === 'red' || phaseStr === 'red';
+  const isYellow = phase === 1 || code === 1 || phase === 'yellow' || phaseStr === 'yellow';
+  const isGreen = phase === 0 || code === 0 || phase === 'green' || phaseStr === 'green';
+  lens(y + 4.72, lin([1, 0.05, 0.03]), isRed);
+  lens(y + 4.44, lin([1, 0.65, 0.05]), isYellow);
+  lens(y + 4.16, lin([0.1, 1, 0.25]), isGreen);
+}
+

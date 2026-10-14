@@ -10,7 +10,8 @@
 // Seasons change only how the land is *drawn* (snow, ice, wet, tints), never what is here.
 import { hash2, fbm, ridged, clamp, lerp, smoothstep, prng } from './noise.js';
 import { CITY_NAMES, TOWN_NAMES, makeName } from './names.js';
-import { SHOULDER, planHighway, lotArrays, lotAt } from './highway.js';
+import { SHOULDER, planHighway, lotArrays, lotAt, scanBridges } from './highway.js';
+import { trafficSignalPhase } from './layout.js';
 
 export const S = 2200; // node spacing (m)
 const LS = 3600; // lake cell (m)
@@ -148,12 +149,27 @@ export class World {
     let forest = clamp(0.2 + 1.3 * (fo - 0.5) + 0.55 * M + 0.55 * (moist - 0.5) - 0.7 * B, 0, 1);
     forest *= 1 - alpine;
     const field = smoothstep(0.46, 0.6, fbm(x / 3100 - 4.1, z / 3100 + 9.5, sd + 12, 3)) * (1 - smoothstep(0.1, 0.3, M)) * (1 - B) * (1 - smoothstep(0.35, 0.7, forest));
+
+    // Wetland / marsh shoreline classification near lakes
+    let wetland = 0;
+    const lks = this.lakesNear ? this.lakesNear(x, z) : [];
+    for (const l of lks) {
+      const rn = this.lakeRn(l, x, z);
+      if (rn >= 0.92 && rn <= 1.45) {
+        const proximity = 1 - Math.min(Math.abs(rn - 1.08) / 0.35, 1);
+        const w = proximity * clamp(0.35 + 0.8 * moist, 0, 1) * (1 - alpine) * (1 - B * 0.8);
+        if (w > wetland) wetland = w;
+      }
+    }
+
     o.mtn = M;
     o.bad = B;
     o.alpine = alpine;
     o.moist = moist;
     o.forest = forest;
     o.field = field;
+    o.wetland = wetland;
+    o.marsh = wetland;
     o.rock = clamp(alpine * 0.9 + M * 0.12 + B * 0.25, 0, 1);
     return o;
   }
@@ -578,12 +594,40 @@ export class World {
     for (let k = 0; k < n; k++) {
       hs[k] += dA * (1 - smoothstep(0, 1, ss[k] / LA)) + dB * (1 - smoothstep(0, 1, (total - ss[k]) / LBd));
     }
-    const gmax = P.grade * step;
-    for (let pass = 0; pass < 4; pass++) {
-      for (let k = 1; k < n - 1; k++) hs[k] = clamp(hs[k], hs[k - 1] - gmax, hs[k - 1] + gmax);
-      for (let k = n - 2; k >= 1; k--) hs[k] = clamp(hs[k], hs[k + 1] - gmax, hs[k + 1] + gmax);
+    for (let pass = 0; pass < 6; pass++) {
+      for (let k = 1; k < n; k++) {
+        const ds = Math.hypot(xs[k] - xs[k - 1], zs[k] - zs[k - 1]);
+        const maxDh = P.grade * ds * 1.15;
+        hs[k] = clamp(hs[k], hs[k - 1] - maxDh, hs[k - 1] + maxDh);
+      }
+      for (let k = n - 2; k >= 0; k--) {
+        const ds = Math.hypot(xs[k + 1] - xs[k], zs[k + 1] - zs[k]);
+        const maxDh = P.grade * ds * 1.15;
+        hs[k] = clamp(hs[k], hs[k + 1] - maxDh, hs[k + 1] + maxDh);
+      }
     }
-    const e = { id: `${i},${j},${dir}`, i, j, dir, cls, P, a, b, n, xs, zs, hs, ss, len: total, name: this.roadName(i, j, dir, cls) };
+    // Smooth vertical transitions so crests and sags don't form sharp kinks
+    for (let it = 0; it < 6; it++) {
+      for (let k = 1; k < n - 1; k++) hs[k] = (hs[k - 1] + 2 * hs[k] + hs[k + 1]) / 4;
+      for (let k = 1; k < n; k++) {
+        const ds = Math.hypot(xs[k] - xs[k - 1], zs[k] - zs[k - 1]);
+        const maxDh = P.grade * ds * 1.15;
+        hs[k] = clamp(hs[k], hs[k - 1] - maxDh, hs[k - 1] + maxDh);
+      }
+      for (let k = n - 2; k >= 0; k--) {
+        const ds = Math.hypot(xs[k + 1] - xs[k], zs[k + 1] - zs[k]);
+        const maxDh = P.grade * ds * 1.15;
+        hs[k] = clamp(hs[k], hs[k + 1] - maxDh, hs[k + 1] + maxDh);
+      }
+    }
+    // Final forward pass to lock against fixed endpoint hs[0]
+    for (let k = 1; k < n; k++) {
+      const ds = Math.hypot(xs[k] - xs[k - 1], zs[k] - zs[k - 1]);
+      const maxDh = P.grade * ds * 1.15;
+      hs[k] = clamp(hs[k], hs[k - 1] - maxDh, hs[k - 1] + maxDh);
+    }
+    const e = { id: `${i},${j},${dir}`, i, j, dir, cls, P, a, b, n, xs, zs, hs, ss, len: total, name: this.roadName(i, j, dir, cls), raw };
+    e.bridges = scanBridges(e, raw, this);
     // highway furnishing: paved shoulders plus rest areas, weigh stations, runaway ramps and interchange lanes
     const plan = planHighway(e);
     const la = lotArrays(plan.lots, ss, n);
@@ -718,7 +762,23 @@ export class World {
     let h = this.plateau(x, z, this.baseHeight(x, z));
     const r = this.roadAt(x, z, this._rq);
     if (r) {
+      const e = r.edge;
+      const s = e.ss[r.k] + r.t * (e.ss[r.k + 1] - e.ss[r.k]);
+      const br = e.bridges ? e.bridges.find((b) => s >= b.s0 - 0.15 && s <= b.s1 + 0.15 && b.kind === 'bridge') : null;
       const hw = this.reachOf(r) + 1.2;
+      if (br) {
+        if (r.d <= hw) return r.y;
+        const dAbut = Math.min(s - br.s0, br.s1 - s);
+        if (dAbut < 14) {
+          const tAbut = dAbut / 14;
+          const bw = clamp(Math.abs(h - r.y) * 2, 7, 36);
+          if (r.d < hw + bw) {
+            const normalH = lerp(h, r.y, 1 - smoothstep(hw, hw + bw, r.d));
+            h = lerp(normalH, h, tAbut);
+          }
+        }
+        return h;
+      }
       if (r.d < hw + 36) {
         const bw = clamp(Math.abs(h - r.y) * 2, 7, 36);
         h = lerp(h, r.y, 1 - smoothstep(hw, hw + bw, r.d));
@@ -741,8 +801,11 @@ export class World {
     const r = this.roadAt(x, z, this._rq);
     if (r && r.d < this.reachOf(r) + 0.3) {
       const e = r.edge;
-      const lot = r.d > e.P.width / 2 + e.sh + 0.3 ? lotAt(e.lots, r.side > 0 ? 1 : -1, e.ss[r.k] + r.t * (e.ss[r.k + 1] - e.ss[r.k])) : null;
-      return { kind: 'road', cls: lot && lot.kind === 'runaway' ? 'gravel' : e.cls, lot: lot ? lot.kind : null, depth: 0, h, base, road: r };
+      const s = e.ss[r.k] + r.t * (e.ss[r.k + 1] - e.ss[r.k]);
+      const bridge = e.bridges ? e.bridges.find((b) => s >= b.s0 - 0.15 && s <= b.s1 + 0.15) : null;
+      const isBridge = !!(bridge && bridge.kind === 'bridge');
+      const lot = r.d > e.P.width / 2 + e.sh + 0.3 ? lotAt(e.lots, r.side > 0 ? 1 : -1, s) : null;
+      return { kind: 'road', cls: lot && lot.kind === 'runaway' ? 'gravel' : e.cls, lot: lot ? lot.kind : null, depth: 0, h, base, road: r, bridge: isBridge, bridgeInfo: bridge || null };
     }
     const n = this.settlementAt(x, z, 0);
     if (n) {
@@ -789,4 +852,12 @@ export class World {
     this.pads.push({ x, z, h, r: 15, bw: 22 });
     this.home = { x, z, h, yaw: Math.atan2(-uz, ux), road: { edge: e, k } };
   }
+
+  /** Deterministic traffic signal query API. */
+  trafficSignalPhase(node, ix, iz, time = 0, axis = 'X') {
+    return trafficSignalPhase(node, ix, iz, time, axis);
+  }
 }
+
+export { trafficSignalPhase };
+

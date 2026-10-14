@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SIDES, opposite, portPoint, turnOf, transitAllowed, turnWeight, pickExit, connectorPath, resample, movementsConflict, classRank, mustYield } from '../src/sim/junction.js';
+import { SIDES, opposite, portPoint, turnOf, transitAllowed, turnWeight, pickExit, connectorPath, resample, movementsConflict, classRank, mustYield, trafficSignalPhase, intersectionSignals } from '../src/sim/junction.js';
 
 const town = { x: 1000, z: -500, Rp: 260, Rz: 190, kind: 'town' };
 const conn = (a, b, node = town) => ({ inSide: a, outSide: b, path: connectorPath(node, a, b) });
@@ -136,4 +136,86 @@ test('connector: takes over from the real roads a little before the ports and st
   const tiny = { x: 0, z: 0, Rp: 14, Rz: 14, kind: 'junction' };
   const t2 = connectorPath(tiny, 'E', 'W', 3, 12, { p: [38, -9], t: [-0.95, 0.31] }, { p: [-38, 9], t: [-0.95, 0.31] });
   for (let k = 1; k < t2.n; k++) assert.ok(t2.xs[k] < t2.xs[k - 1] + 1e-9, 'always heading west');
+});
+
+test('traffic signals: deterministic 3-phase cycle (green 20s, yellow 4s, red 24s, cycle 48s)', () => {
+  // Axis X
+  const x0 = trafficSignalPhase(town, 1000, -500, 0, 'X');
+  assert.equal(x0.phase, 'green');
+  assert.equal(x0.code, 0);
+  assert.equal(x0.timeRemaining, 20);
+  assert.equal(x0.cycle, 48);
+
+  const x19 = trafficSignalPhase(town, 1000, -500, 19.5, 'X');
+  assert.equal(x19.phase, 'green');
+  assert.ok(Math.abs(x19.timeRemaining - 0.5) < 1e-6);
+
+  const x20 = trafficSignalPhase(town, 1000, -500, 20, 'X');
+  assert.equal(x20.phase, 'yellow');
+  assert.equal(x20.code, 1);
+  assert.equal(x20.timeRemaining, 4);
+
+  const x23 = trafficSignalPhase(town, 1000, -500, 23.5, 'X');
+  assert.equal(x23.phase, 'yellow');
+  assert.ok(Math.abs(x23.timeRemaining - 0.5) < 1e-6);
+
+  const x24 = trafficSignalPhase(town, 1000, -500, 24, 'X');
+  assert.equal(x24.phase, 'red');
+  assert.equal(x24.code, 2);
+  assert.equal(x24.timeRemaining, 24);
+
+  const x47 = trafficSignalPhase(town, 1000, -500, 47.5, 'X');
+  assert.equal(x47.phase, 'red');
+  assert.ok(Math.abs(x47.timeRemaining - 0.5) < 1e-6);
+
+  // Axis Z (orthogonal: red when X is green/yellow, green when X is red)
+  const z0 = trafficSignalPhase(town, 1000, -500, 0, 'Z');
+  assert.equal(z0.phase, 'red');
+  assert.equal(z0.code, 2);
+  assert.equal(z0.timeRemaining, 24);
+
+  const z24 = trafficSignalPhase(town, 1000, -500, 24, 'Z');
+  assert.equal(z24.phase, 'green');
+  assert.equal(z24.code, 0);
+  assert.equal(z24.timeRemaining, 20);
+
+  const z44 = trafficSignalPhase(town, 1000, -500, 44, 'Z');
+  assert.equal(z44.phase, 'yellow');
+  assert.equal(z44.code, 1);
+  assert.equal(z44.timeRemaining, 4);
+
+  // Full cycle wrap-around check
+  const x48 = trafficSignalPhase(town, 1000, -500, 48, 'X');
+  assert.equal(x48.phase, 'green');
+  assert.equal(x48.timeRemaining, 20);
+});
+
+test('traffic signals: intersectionSignals helper returns signal states for town node', () => {
+  const signals = intersectionSignals(town, 10);
+  assert.ok(Array.isArray(signals));
+  assert.ok(signals.length >= 2);
+  const xSig = signals.find((s) => s.axis === 'X');
+  const zSig = signals.find((s) => s.axis === 'Z');
+  assert.ok(xSig && zSig);
+  assert.equal(xSig.phase, 'green');
+  assert.equal(zSig.phase, 'red');
+});
+
+test('give way: emergency vehicles have unconditional priority over normal traffic', () => {
+  const normal = { rank: 5, eta: 1.0, id: 10, isEmergency: false };
+  const emergency = { rank: 2, eta: 5.0, id: 20, isEmergency: true };
+  assert.equal(mustYield(normal, emergency), true, 'normal vehicle yields to emergency vehicle even with higher rank and closer eta');
+  assert.equal(mustYield(emergency, normal), false, 'emergency vehicle does not yield to normal vehicle');
+  // Two emergency vehicles break ties normally
+  const emergA = { rank: 3, eta: 2.0, id: 1, isEmergency: true };
+  const emergB = { rank: 3, eta: 4.0, id: 2, isEmergency: true };
+  assert.equal(mustYield(emergA, emergB), false);
+  assert.equal(mustYield(emergB, emergA), true);
+});
+
+test('give way: anti-deadlock priority breaker grants priority to longest-waiting vehicle after 6.0s', () => {
+  const waitingShort = { rank: 4, eta: 2.0, id: 1, waitT: 2.0 };
+  const waitingLong = { rank: 2, eta: 5.0, id: 2, waitT: 6.5 };
+  assert.equal(mustYield(waitingLong, waitingShort), false, 'longest waiting vehicle (>6s) does not yield even from lower rank road');
+  assert.equal(mustYield(waitingShort, waitingLong), true, 'shorter waiting vehicle yields to longest waiting vehicle');
 });

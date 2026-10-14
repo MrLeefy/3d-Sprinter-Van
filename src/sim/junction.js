@@ -192,6 +192,24 @@ export const classRank = (cls) => CLASS_RANK[cls] ?? 2;
  * one of two vehicles gives way).
  */
 export function mustYield(me, other, horizon = 6) {
+  // Emergency vehicle priority: non-emergency vehicles yield unconditionally to emergency vehicles
+  const meEmerg = Boolean(me.isEmergency);
+  const otherEmerg = Boolean(other.isEmergency);
+  if (otherEmerg && !meEmerg) return true;
+  if (meEmerg && !otherEmerg) return false;
+
+  // A vehicle actively moving inside the junction has right-of-way,
+  // unless it is stalled/deadlocked (other.waitT > 6.0)
+  if (other.holds && (other.waitT ?? 0) <= 6.0) return true;
+  if (me.holds && (me.waitT ?? 0) <= 6.0) return false;
+
+  // Anti-deadlock priority breaker: if waitT > 6.0s, grant priority to longest-waiting vehicle
+  const meWait = me.waitT ?? 0, otherWait = other.waitT ?? 0;
+  if (meWait > 6.0 || otherWait > 6.0) {
+    if (meWait > 6.0 && meWait >= otherWait) return false;
+    if (otherWait > 6.0 && otherWait > meWait) return true;
+  }
+
   if (other.holds) return true;
   if (me.holds) return false;
   if (other.eta > horizon) return false;
@@ -199,3 +217,65 @@ export function mustYield(me, other, horizon = 6) {
   if (Math.abs(other.eta - me.eta) < 0.4) return other.id < me.id;
   return other.eta < me.eta;
 }
+
+// ── Traffic signals ───────────────────────────────────────────────────────────
+/**
+ * Deterministic 3-phase traffic signal controller for town intersections.
+ * Cycle: Green 20s, Yellow 4s, Red 24s. Total cycle length = 48s.
+ * Axis 'X' runs Green [0..20), Yellow [20..24), Red [24..48).
+ * Axis 'Z' runs Red [0..24), Green [24..44), Yellow [44..48).
+ *
+ * @param {object|null} node - settlement node object
+ * @param {number} ix - intersection x coordinate (meters)
+ * @param {number} iz - intersection z coordinate (meters)
+ * @param {number} time - simulation time in seconds
+ * @param {string} axis - 'X' (East-West) or 'Z' (North-South)
+ * @returns {{ phase: 'green' | 'yellow' | 'red', code: 0 | 1 | 2, timeRemaining: number, cycle: number }}
+ */
+export function trafficSignalPhase(node, ix, iz, time, axis = 'X') {
+  const ax = String(axis || 'X').toUpperCase();
+  const t = ((time % 48) + 48) % 48;
+  if (ax === 'Z') {
+    if (t < 24) {
+      return { phase: 'red', code: 2, timeRemaining: 24 - t, cycle: 48 };
+    } else if (t < 44) {
+      return { phase: 'green', code: 0, timeRemaining: 44 - t, cycle: 48 };
+    } else {
+      return { phase: 'yellow', code: 1, timeRemaining: 48 - t, cycle: 48 };
+    }
+  } else {
+    if (t < 20) {
+      return { phase: 'green', code: 0, timeRemaining: 20 - t, cycle: 48 };
+    } else if (t < 24) {
+      return { phase: 'yellow', code: 1, timeRemaining: 24 - t, cycle: 48 };
+    } else {
+      return { phase: 'red', code: 2, timeRemaining: 48 - t, cycle: 48 };
+    }
+  }
+}
+
+/**
+ * Helper query: returns an array of all traffic signal states in a town settlement node.
+ */
+export function intersectionSignals(node, time) {
+  if (!node) return [];
+  const signals = [];
+  if (node.layout?.props?.misc) {
+    for (const p of node.layout.props.misc) {
+      if (p[3] === 'signal') {
+        const x = p[0], z = p[1], rot = p[2];
+        const alongX = Math.abs(Math.sin(rot)) < 0.5;
+        const axis = alongX ? 'X' : 'Z';
+        signals.push({ x, z, rot, axis, ...trafficSignalPhase(node, x, z, time, axis) });
+      }
+    }
+  }
+  if (signals.length === 0 && (node.kind === 'town' || node.kind === 'city' || node.signalized)) {
+    signals.push(
+      { x: node.x ?? 0, z: node.z ?? 0, axis: 'X', ...trafficSignalPhase(node, node.x ?? 0, node.z ?? 0, time, 'X') },
+      { x: node.x ?? 0, z: node.z ?? 0, axis: 'Z', ...trafficSignalPhase(node, node.x ?? 0, node.z ?? 0, time, 'Z') }
+    );
+  }
+  return signals;
+}
+

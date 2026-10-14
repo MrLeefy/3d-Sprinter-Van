@@ -1,6 +1,8 @@
 // Synthesised drive sound (no audio files): 4-cylinder diesel firing note and sub-rumble, a
 // throttle-dependent clatter, wind that grows with speed², and tyre noise off the track.
 // Created on a user gesture (the Drive button), so browsers allow it to play.
+import { Sfx } from './sfx.js';
+
 export class EngineSound {
   constructor() {
     this.ctx = null;
@@ -82,6 +84,44 @@ export class EngineSound {
     this.gSqueal = ctx.createGain();
     this.gSqueal.gain.value = 0;
     noise().connect(squeal).connect(this.gSqueal).connect(this.master);
+    // paved-road tyre hum
+    const road = ctx.createBiquadFilter();
+    road.type = 'lowpass';
+    road.frequency.value = 420;
+    this.gRoad = ctx.createGain();
+    this.gRoad.gain.value = 0;
+    noise().connect(road).connect(this.gRoad).connect(this.master);
+    // heavy diesel: exhaust rumble, turbo whistle and compression-release (engine brake) chatter
+    const rumble = ctx.createBiquadFilter();
+    rumble.type = 'lowpass';
+    rumble.frequency.value = 160;
+    this.gRumble = ctx.createGain();
+    this.gRumble.gain.value = 0;
+    noise().connect(rumble).connect(this.gRumble).connect(this.master);
+    this.turbo = ctx.createOscillator();
+    this.turbo.type = 'sine';
+    this.gTurbo = ctx.createGain();
+    this.gTurbo.gain.value = 0;
+    this.turbo.connect(this.gTurbo).connect(this.master);
+    this.turbo.start();
+    const jake = ctx.createBiquadFilter();
+    jake.type = 'bandpass';
+    jake.frequency.value = 850;
+    jake.Q.value = 1.1;
+    const jakeMod = ctx.createGain();
+    jakeMod.gain.value = 0.5;
+    this.jakeLfo = ctx.createOscillator();
+    this.jakeLfo.type = 'square';
+    const depth = ctx.createGain();
+    depth.gain.value = 0.5;
+    this.jakeLfo.connect(depth).connect(jakeMod.gain);
+    this.jakeLfo.start();
+    this.gJake = ctx.createGain();
+    this.gJake.gain.value = 0;
+    noise().connect(jake).connect(jakeMod).connect(this.gJake).connect(this.master);
+    // recorded effects and ambience
+    this.sfx = new Sfx(ctx, ctx.destination);
+    this.sfx.load();
   }
 
   /** Two-tone horn. */
@@ -150,7 +190,7 @@ export class EngineSound {
   }
 
   /** rpm, throttle 0..1, speed m/s, offroad 0..1, active (engine running), slip 0..1 (tyre squeal) */
-  update(rpm, throttle, speed, offroad, active, slip = 0) {
+  update(rpm, throttle, speed, offroad, active, slip = 0, extra = {}) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime, k = 0.08;
     const f = (rpm / 60) * (this.truck ? 3 : 2);
@@ -161,7 +201,22 @@ export class EngineSound {
     this.gWind.gain.setTargetAtTime(Math.min(0.22, speed * speed * 0.00018), t, 0.2);
     this.gTyre.gain.setTargetAtTime(Math.min(0.12, offroad * speed * 0.012), t, 0.15);
     this.gSqueal.gain.setTargetAtTime(Math.min(0.07, slip * Math.min(1, speed / 12) * 0.07), t, 0.08);
+    const T = this.truck;
+    this.gRoad.gain.setTargetAtTime(Math.min(0.12, (1 - Math.min(1, offroad)) * speed * (T ? 0.0045 : 0.0028)), t, 0.2);
+    this.gRumble.gain.setTargetAtTime(T ? 0.05 + throttle * 0.12 : 0, t, 0.15);
+    this.turbo.frequency.setTargetAtTime(1500 + rpm * 1.9, t, 0.1);
+    this.gTurbo.gain.setTargetAtTime(T ? Math.max(0, throttle - 0.25) * 0.012 * Math.min(1, rpm / 1500) : 0, t, 0.2);
+    this.jakeLfo.frequency.setTargetAtTime(Math.max(8, f / 2), t, 0.05);
+    this.gJake.gain.setTargetAtTime(T ? (extra.jake || 0) * 0.16 : 0, t, 0.08);
+    this.sfx?.setVolume(active && this.on ? this.volume : 0, active ? 0.25 : 1.4);
     this.master.gain.setTargetAtTime(active && this.on ? 0.5 * this.volume : 0, t, 0.25);
+  }
+
+  /** Crash, park brake, door and similar one-shots. */
+  fx(kind, a, b, c) {
+    if (!this.on) return;
+    if (kind === 'impact') this.sfx?.impact(a, b, c);
+    else this.sfx?.play(kind, a ?? 1, b ?? 1);
   }
 
   setOn(on) {

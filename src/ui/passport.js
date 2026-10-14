@@ -27,10 +27,18 @@ const ACH = [
   ['refuel', 'Fill ’er up', 'Buy diesel.', (s) => (s.flags.refuel ? 1 : 0), 1, 15],
   ['camp', 'Off the grid, on the books', 'Check in at a campground.', (s) => (s.flags.camp ? 1 : 0), 1, 20],
   ['high', 'Higher ground', 'Reach 1,300 m elevation.', (s) => s.maxElev, 1300, 60],
+  ['job1', 'First delivery', 'Complete a freight job in the semi.', (s) => s.jobs?.n || 0, 1, 100],
+  ['job10', 'Regular route', 'Complete 10 freight deliveries.', (s) => s.jobs?.n || 0, 10, 400],
+  ['job50', 'Owner-operator', 'Complete 50 freight deliveries.', (s) => s.jobs?.n || 0, 50, 1500],
+  ['haul100', 'Long haul', 'Haul freight 100 km.', (s) => s.jobs?.km || 0, 100, 300],
+  ['haul1000', 'Million-mile mindset', 'Haul freight 1,000 km.', (s) => s.jobs?.km || 0, 1000, 2500],
+  ['perfect', 'White-glove service', 'Deliver on time with no damage and no tickets.', (s) => s.jobs?.perfect || 0, 1, 150],
+  ['hazmat', 'Hazmat certified', 'Deliver 3 hazmat loads.', (s) => s.jobs?.hazmat || 0, 3, 300],
+  ['freight5k', 'Freight baron', 'Earn $5,000 from freight.', (s) => s.jobs?.earned || 0, 5000, 600],
   ['wild', 'Wildlife watcher', 'Spot 5 animals from the road.', (s) => s.animals, 5, 50],
 ];
 
-const fresh = () => ({ visited: [], names: {}, found: [], ach: {}, flags: {}, km: 0, offKm: 0, snowKm: 0, iceM: 0, nightKm: 0, cities: 0, maxElev: 0, animals: 0, log: [] });
+const fresh = () => ({ visited: [], names: {}, found: [], ach: {}, flags: {}, km: 0, offKm: 0, snowKm: 0, iceM: 0, nightKm: 0, cities: 0, maxElev: 0, animals: 0, log: [], jobs: { n: 0, km: 0, earned: 0, perfect: 0, hazmat: 0, late: 0 } });
 
 export class Passport {
   constructor(ui) {
@@ -119,6 +127,20 @@ export class Passport {
   sawAnimal() {
     this.st.animals++;
     this.check();
+  }
+
+  /** A freight delivery finished (called by the jobs module). */
+  freightDone({ km, earned, clean, onTime, hazmat, company, cargo, town }) {
+    const j = (this.st.jobs ||= fresh().jobs);
+    j.n++;
+    j.km += km;
+    j.earned += earned;
+    if (clean) j.perfect++;
+    if (hazmat) j.hazmat++;
+    if (!onTime) j.late++;
+    this.log(`Delivered ${cargo} to ${company}, ${town}`);
+    this.check();
+    this.save();
   }
 
   mapPois() {
@@ -211,6 +233,7 @@ export class Passport {
       <div class="ps-stats">
         <div><b>${stamps.length}</b><span>stamps</span></div><div><b>${st.found.length}</b><span>discoveries</span></div><div><b>${dist(st.km)}</b><span>driven</span></div>
         <div><b>${done}/${ACH.length}</b><span>achievements</span></div></div>
+      ${st.jobs?.n ? `<p class="dh-note">Freight: <b>${st.jobs.n}</b> deliveries · ${dist(st.jobs.km)} hauled · ${money(st.jobs.earned)} earned · ${st.jobs.perfect} perfect</p>` : ''}
       <h4>Stamps</h4>
       <div class="ps-stamps">${stamps.length ? stamps.map((s) => `<span class="ps-st ${s.kind}">${s.name}<small>${KIND_LABEL[s.kind] || s.kind}</small></span>`).join('') : '<p class="dh-note">No stamps yet — drive into a town, village or campground.</p>'}</div>
       <h4>Achievements</h4>

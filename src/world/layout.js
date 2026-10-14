@@ -9,6 +9,13 @@ export const TILE = 96;
 export const tileKey = (tx, tz) => (tx + 32768) * 65536 + (tz + 32768);
 const FH = 3.1; // storey height (m)
 
+/** Parked-vehicle models, indexed by the `kind` of a car prop. 6–8 are tractor + trailer rigs (~22 m). */
+export const CAR_MODELS = ['sedan', 'suv', 'hatch', 'van', 'pickup', 'tractor', 'dryvan', 'tanker', 'flatbed'];
+export const CAR_LEN = [4.72, 4.78, 4.05, 5.9, 6.0, 8.6, 22.5, 22.5, 22.5];
+/** Yaw whose forward vector (cos r, -sin r) points along (dx, dz) — the convention of every car and furniture prop. */
+export const faceRot = (dx, dz) => Math.atan2(-dz, dx);
+const SW = 3.4; // sidewalk width, matches the block inset
+
 class Layout {
   constructor(world, n) {
     this.world = world;
@@ -17,6 +24,8 @@ class Layout {
     this.streets = [];
     this.blocks = [];
     this.props = { lamps: [], trees: [], cars: [], misc: [] };
+    this.rails = []; // [ax, az, bx] east–west track centrelines
+    this.peds = []; // [x, z, dx, dz, len, speed, phase, seed] sidewalk walkers
     this.zones = [];
     this.signs = [];
     this.tiles = new Map();
@@ -26,7 +35,7 @@ class Layout {
   tile(tx, tz) {
     const k = tileKey(tx, tz);
     let t = this.tiles.get(k);
-    if (!t) this.tiles.set(k, (t = { lots: [], streets: [], blocks: [], lamps: [], trees: [], cars: [], misc: [], signs: [] }));
+    if (!t) this.tiles.set(k, (t = { lots: [], streets: [], blocks: [], lamps: [], trees: [], cars: [], misc: [], signs: [], rails: [], peds: [] }));
     return t;
   }
 
@@ -70,11 +79,31 @@ class Layout {
     return b;
   }
 
-  prop(kind, arr) {
+  prop(kind, arr, rad = 1) {
     const list = this.props[kind];
     const id = list.length;
     list.push(arr);
-    this.reg(kind, id, arr[0] - 1, arr[0] + 1, arr[1] - 1, arr[1] + 1);
+    this.reg(kind, id, arr[0] - rad, arr[0] + rad, arr[1] - rad, arr[1] + rad);
+    return id;
+  }
+
+  /** Street furniture / small scenery: [x, z, rot, type, a, b, c]. */
+  furn(type, x, z, rot = 0, a = 0, b = 0, c = 0, rad = 1) {
+    return this.prop('misc', [x, z, rot, type, a, b, c], rad);
+  }
+
+  /** East–west railway line from (ax, az) to (bx, az). */
+  rail(ax, az, bx) {
+    const id = this.rails.length;
+    this.rails.push([ax, az, bx]);
+    this.reg('rails', id, ax, bx, az - 3, az + 3);
+    return id;
+  }
+
+  ped(x, z, dx, dz, len, speed, phase, seed) {
+    const id = this.peds.length;
+    this.peds.push([x, z, dx, dz, len, speed, phase, seed]);
+    this.reg('peds', id, Math.min(x, x + dx * len) - 1, Math.max(x, x + dx * len) + 1, Math.min(z, z + dz * len) - 1, Math.max(z, z + dz * len) + 1);
     return id;
   }
 
@@ -83,8 +112,8 @@ class Layout {
     this.prop('trees', [x, z, s, type]);
   }
 
-  car(x, z, rot, kind = 0) {
-    this.prop('cars', [x, z, rot, kind, this.rng()]);
+  car(x, z, rot, kind = 0, rn = this.rng()) {
+    return this.prop('cars', [x, z, rot, kind, rn]);
   }
 
   zone(type, x, z, r, extra = {}) {
@@ -111,6 +140,43 @@ class Layout {
 
 const pick = (rng, arr) => arr[Math.floor(rng() * arr.length)];
 
+/** Everyday passenger-vehicle mix: sedan, SUV, hatch, van, pickup. */
+const carKind = (rng) => {
+  const r = rng();
+  return r < 0.28 ? 0 : r < 0.5 ? 1 : r < 0.62 ? 2 : r < 0.86 ? 4 : 3;
+};
+
+/** Cars waiting in a house's driveway (0–2), nose toward the street half the time. */
+function driveway(L, lot, rng, len, street = 1) {
+  const f = lot.facing === 'z-' ? -1 : 1;
+  const gx = lot.x - lot.w / 2 + lot.w * 0.76;
+  lot.drive = len;
+  const frontZ = f > 0 ? lot.z + lot.d / 2 : lot.z - lot.d / 2;
+  const n = rng() < 0.22 ? 0 : rng() < 0.7 ? 1 : 2;
+  let off = 0.4;
+  for (let i = 0; i < n; i++) {
+    const kind = carKind(rng), l = CAR_LEN[kind];
+    if (off + l > len - 0.4) break;
+    const out = rng() < 0.5 ? f : -f;
+    L.car(gx + (rng() - 0.5) * 0.3, frontZ + f * (off + l / 2), faceRot(0, out), kind);
+    off += l + 0.7;
+  }
+  void street;
+  // mailbox at the kerb, a hydrant now and then
+  const mz = frontZ + f * (len - 0.35);
+  L.furn('mailbox', lot.x + lot.w * 0.18, mz, faceRot(0, f));
+}
+
+/** Sidewalk strollers along one block edge: segments of 14–40 m walked back and forth. */
+function strollers(L, rng, x0, x1, zEdge, count) {
+  for (let i = 0; i < count; i++) {
+    const len = Math.min(x1 - x0 - 2, 14 + rng() * 26);
+    if (len < 6) continue;
+    const xs = x0 + 1 + rng() * Math.max(0, x1 - x0 - len - 2);
+    L.ped(xs, zEdge, 1, 0, len, 0.9 + rng() * 0.7, rng(), Math.floor(rng() * 1000));
+  }
+}
+
 // ── Urban fill (cities and towns) ───────────────────────────────────────────
 function fillRows(L, r, rng, opt) {
   // two rows of lots against the long edges of the block
@@ -128,7 +194,15 @@ function fillRows(L, r, rng, opt) {
       }
       const fl = typeof floors === 'function' ? floors(rng) : floors;
       const lot = L.lot(opt.pick ? opt.pick(rng) : k, x + w / 2, zc, w - gap, depth, { floors: fl, roof: roof ?? 'gable', pal: Math.floor(rng() * 8), ridge: 'x' });
-      lot.facing = side < 0 ? 'z+' : 'z-';
+      lot.facing = side < 0 ? 'z-' : 'z+'; // fronts face the street on their side of the block
+      if (lot.k === 'house') {
+        driveway(L, lot, rng, setback + SW);
+        if (rng() < 0.45) {
+          // back-yard fence along the rear lot line
+          const rz = side < 0 ? zc + depth / 2 + 0.6 : zc - depth / 2 - 0.6;
+          L.furn('fence', lot.x, rz, 0, w - gap, 0, 0, w / 2 + 1);
+        }
+      }
       x += w;
     }
   }
@@ -138,6 +212,13 @@ function fillRows(L, r, rng, opt) {
 function fillBlockUrban(L, r, zone, rng, n, rho, big) {
   const W = r.x1 - r.x0, D = r.z1 - r.z0;
   const cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
+  const walkN = { core: 5, mid: 3, dense: 1, shops: 0, park: 0, courthouse: 2, school: 1, church: 1, hospital: 2, houses: rng() < 0.3 ? 1 : 0 }[zone] || 0;
+  for (let i = 0; i < walkN; i++) {
+    const north = rng() < 0.5;
+    strollers(L, rng, r.x0, r.x1, north ? r.z0 - SW * 0.5 : r.z1 + SW * 0.5, 1);
+  }
+  if ((zone === 'core' || zone === 'mid' || zone === 'dense') && rng() < 0.6) L.furn('bench', cx + (rng() - 0.5) * W * 0.5, r.z1 + SW * 0.5, faceRot(0, 1), 0, 0, 0, 2);
+  if (zone === 'core' || zone === 'mid') for (let i = 0; i < 3; i++) L.tree(r.x0 + 4 + rng() * (W - 8), rng() < 0.5 ? r.z0 - 1.2 : r.z1 + 1.2, 0.7 + rng() * 0.4, 1);
   if (zone === 'core') {
     const towers = rng() < 0.55;
     if (towers) {
@@ -155,7 +236,8 @@ function fillBlockUrban(L, r, zone, rng, n, rho, big) {
       for (const sz of [-1, 1]) {
         if (rng() < 0.12) continue;
         const w = W / 2 - 5 - rng() * 4, d = D / 2 - 5 - rng() * 3;
-        L.lot(rng() < 0.7 ? 'office' : 'apt', cx + sx * (W / 4), cz + sz * (D / 4), w, d, { floors: 3 + Math.floor(rng() * 5), fh: 3.4, pal: Math.floor(rng() * 8), roof: 'flat' });
+        const brick = rng() < 0.4; // tall red-brick blocks
+        L.lot(brick || rng() < 0.7 ? 'office' : 'apt', cx + sx * (W / 4), cz + sz * (D / 4), w, d, { floors: 3 + Math.floor(rng() * (brick ? 6 : 5)), fh: 3.4, pal: brick ? 4 : Math.floor(rng() * 8), roof: 'flat' });
       }
     }
   } else if (zone === 'dense') {
@@ -183,6 +265,10 @@ function fillBlockUrban(L, r, zone, rng, n, rho, big) {
     }
     const by = edge === 'z1' ? r.z0 + (D - depth) / 2 - 3 : r.z1 - (D - depth) / 2 + 3;
     for (let i = 0; i < 4; i++) L.tree(r.x0 + 6 + rng() * (W - 12), by + (rng() - 0.5) * 6, 0.8 + rng() * 0.5);
+    // sidewalk benches and strollers on the frontage side
+    const sz = edge === 'z1' ? r.z1 + SW * 0.5 : r.z0 - SW * 0.5, fz = edge === 'z1' ? 1 : -1;
+    for (let i = 0; i < 2; i++) if (rng() < 0.7) L.furn('bench', r.x0 + 8 + rng() * (W - 16), sz + fz * 0.6, faceRot(0, fz), 0, 0, 0, 2);
+    strollers(L, rng, r.x0, r.x1, sz, big ? 3 : 2);
   } else if (zone === 'industrial') {
     const silo = rng() < 0.6;
     const n1 = 1 + Math.floor(rng() * 2);
@@ -195,21 +281,49 @@ function fillBlockUrban(L, r, zone, rng, n, rho, big) {
   } else if (zone === 'park') {
     for (let i = 0; i < 16; i++) L.tree(r.x0 + 3 + rng() * (W - 6), r.z0 + 3 + rng() * (D - 6), 0.9 + rng() * 0.9);
     L.lot('pavilion', cx, cz, 9, 7, { floors: 1, h: 3.2, roof: 'hip', solid: false, pal: 6 });
+    for (let i = 0; i < 4; i++) L.furn('bench', cx + (i < 2 ? -7 : 7), cz + (i % 2 ? 6 : -6), faceRot(0, i % 2 ? -1 : 1), 0, 0, 0, 2);
+    for (let i = 0; i < 3; i++) L.ped(r.x0 + 6 + rng() * 10, cz + (rng() - 0.5) * (D - 14), 1, 0, 14 + rng() * (W - 36), 0.8 + rng() * 0.5, rng(), Math.floor(rng() * 1000));
   } else if (zone === 'courthouse') {
     L.lot('courthouse', cx, cz + 3, Math.min(W - 6, 38), Math.min(D - 12, 24), { floors: 3, fh: 4, pal: 5, roof: 'flat', extra: { clock: true } });
+    L.furn('flag', cx + 11, r.z1 - 1.5, faceRot(0, 1), 11, 0, 0, 3);
+    L.furn('flag', cx - 11, r.z1 - 1.5, faceRot(0, 1), 11, 0, 0, 3);
     for (let i = 0; i < 8; i++) L.tree(r.x0 + 4 + rng() * (W - 8), r.z1 - 4 - rng() * 4, 0.8 + rng() * 0.4);
   } else if (zone === 'church') {
     L.lot('church', cx, cz, 14, 28, { floors: 2, fh: 4.4, pal: 0, roof: 'gable', ridge: 'z' });
     for (let i = 0; i < 6; i++) L.tree(r.x0 + 4 + rng() * (W - 8), r.z0 + 4 + rng() * (D - 8), 0.8 + rng() * 0.6);
   } else if (zone === 'school') {
     L.lot('school', cx, cz - 6, Math.min(W - 8, 52), 16, { floors: 2, fh: 3.8, pal: 4, roof: 'flat' });
+    L.furn('flag', cx - 14, cz + 4, faceRot(0, 1), 9, 0, 0, 3);
+    L.furn('bus', cx + 20, r.z0 - SW * 0.5 - 0.2, faceRot(0, -1), 0, 0, 0, 3);
     // sports field
     L.lot('field', cx, cz + 17, Math.min(W - 10, 44), 14, { floors: 0, h: 0.05, solid: false });
   } else if (zone === 'hospital') {
     L.lot('hospital', cx, cz, Math.min(W - 8, 46), Math.min(D - 8, 30), { floors: 5, fh: 3.8, pal: 0, roof: 'flat' });
   } else if (zone === 'lot') {
-    // car park with a few cars
-    for (let i = 0; i < 10; i++) L.car(r.x0 + 6 + rng() * (W - 12), r.z0 + 6 + rng() * (D - 12), rng() < 0.5 ? 0 : Math.PI / 2, 0);
+    // car park: a double row of 90-degree bays either side of a 7 m aisle (stripes drawn by the renderer)
+    const bw = 2.9, bl = 5.4, aisle = 7.4, n = Math.floor((W - 6) / bw);
+    const x0 = cx - (n * bw) / 2;
+    for (const sd of [-1, 1]) {
+      const zc = cz + sd * (aisle / 2 + bl / 2);
+      if (Math.abs(zc - cz) + bl / 2 > D / 2 - 1) continue;
+      L.furn('bays', x0, zc, faceRot(0, -sd), n, bw, bl, n * bw / 2 + 2);
+      for (let i = 0; i < n; i++) if (rng() < 0.55) L.car(x0 + (i + 0.5) * bw + (rng() - 0.5) * 0.3, zc + (rng() - 0.5) * 0.4, faceRot(0, rng() < 0.5 ? -sd : sd), carKind(rng));
+    }
+    for (let i = 0; i < 3; i++) L.prop('lamps', [x0 + (i + 0.5) * (n * bw) / 3, cz, i % 2 ? Math.PI / 2 : -Math.PI / 2]);
+  } else if (zone === 'ranch') {
+    // edge-of-town spread: a big house set back on a fenced lot, outbuildings, shelter belt, pickup in the yard
+    const hw = 14 + rng() * 4, hd = 10 + rng() * 2;
+    const hx = r.x0 + hw / 2 + 6 + rng() * Math.max(1, W - hw - 40), hz = rng() < 0.5 ? r.z0 + hd / 2 + 8 : r.z1 - hd / 2 - 8;
+    const north = hz < cz;
+    const house = L.lot('house', hx, hz, hw, hd, { floors: 1 + (rng() < 0.3 ? 1 : 0), fh: 3.2, pal: Math.floor(rng() * 8), roof: 'gable', ridge: 'x' });
+    house.facing = north ? 'z-' : 'z+';
+    driveway(L, house, rng, 8 + SW);
+    if (rng() < 0.7) L.lot('barn', hx + hw / 2 + 18 + rng() * Math.max(0, W - hw - 60), hz + (north ? 6 : -6), 15, 10.5, { h: 8, pal: 4, roof: 'gambrel', ridge: 'x' });
+    if (rng() < 0.6) L.lot('shed', r.x1 - 14, north ? r.z1 - 12 : r.z0 + 12, 9, 6, { floors: 1, fh: 3, pal: 7, roof: 'flat' });
+    for (let i = 0; i < 10; i++) L.tree(r.x0 + 4 + i * ((W - 8) / 9), north ? r.z1 - 3 : r.z0 + 3, 1.1 + rng() * 0.5, 0);
+    // paddock fence along the block's inner edge, with a gap for the drive
+    L.furn('fence', cx - W / 4, north ? r.z1 - 8 : r.z0 + 8, 0, W / 2 - 4, 1, 0, W / 4 + 2);
+    L.furn('fence', cx + W / 4 + 3, north ? r.z1 - 8 : r.z0 + 8, 0, W / 2 - 6, 1, 0, W / 4 + 2);
   }
 }
 
@@ -221,8 +335,13 @@ function urban(L, world, n) {
   const Mmax = Math.floor(Rz / G.bz), Kmax = Math.floor(Rp / G.bx);
   const chordX = (dz) => Rp * Math.sqrt(Math.max(0, 1 - (dz / Rz) ** 2)) * 0.97;
   const chordZ = (dx) => Rz * Math.sqrt(Math.max(0, 1 - (dx / Rp) ** 2)) * 0.97;
+  // a 25 m rig needs ~10 m to swing a corner: minor streets are never narrower than 11 m
+  const wMainH = G.wMain, wMainV = G.wMain - 2, wMin = Math.max(G.wMinor, 11), wRail = 8;
   const hasH = new Map(), hasV = new Map();
   const names = new Set();
+  // railway: one block south of Main St in towns, near the southern/northern edge in cities
+  const wantRail = hash2(n.i, n.j, 97) < (big ? 0.85 : 0.8);
+  const railM = !wantRail ? null : big ? (hash2(n.i, n.j, 98) < 0.5 ? 1 : -1) * Math.max(2, Mmax - 1) : 1;
   const streetName = (seed) => {
     let s, t = 0;
     do s = STREETS[Math.floor(hash2(seed, t++, n.seed) * STREETS.length)];
@@ -234,15 +353,19 @@ function urban(L, world, n) {
     const dz = m * G.bz, half = m === 0 ? Rp : chordX(dz);
     if (m !== 0 && half < G.bx * 0.8) continue;
     hasH.set(m, half);
-    L.street(cx - half, cz + dz, cx + half, cz + dz, m === 0 ? G.wMain : G.wMinor, m === 0 ? 'main' : 'minor', m === 0 ? 'Main St' : `${streetName(m * 31 + 1)} St`);
+    if (m === railM) {
+      L.street(cx - half - 60, cz + dz, cx + half + 60, cz + dz, wRail, 'gravel', 'Railroad Ave');
+      L.rail(cx - half - 60, cz + dz, cx + half + 60);
+    } else L.street(cx - half, cz + dz, cx + half, cz + dz, m === 0 ? wMainH : wMin, m === 0 ? 'main' : 'minor', m === 0 ? 'Main St' : `${streetName(m * 31 + 1)} St`);
   }
   for (let k = -Kmax; k <= Kmax; k++) {
     const dx = k * G.bx, half = k === 0 ? Rz : chordZ(dx);
     if (k !== 0 && half < G.bz * 0.8) continue;
     hasV.set(k, half);
-    L.street(cx + dx, cz - half, cx + dx, cz + half, k === 0 ? G.wMain - 2 : G.wMinor, k === 0 ? 'main' : 'minor', k === 0 ? 'Center Ave' : `${streetName(k * 37 + 2)} Ave`);
+    L.street(cx + dx, cz - half, cx + dx, cz + half, k === 0 ? wMainV : wMin, k === 0 ? 'main' : 'minor', k === 0 ? 'Center Ave' : `${streetName(k * 37 + 2)} Ave`);
   }
-  const wHalfH = (m) => (m === 0 ? G.wMain : G.wMinor) / 2, wHalfV = (k) => (k === 0 ? G.wMain - 2 : G.wMinor) / 2;
+  const wH = (m) => (m === 0 ? wMainH : m === railM ? wRail : wMin), wV = (k) => (k === 0 ? wMainV : wMin);
+  const wHalfH = (m) => wH(m) / 2, wHalfV = (k) => wV(k) / 2;
   // specials at the edges are placed first; blocks that would overlap them are dropped
   const side = hash2(n.i, n.j, 91) < 0.5 ? 1 : -1;
   const reserved = (L.reserved = []);

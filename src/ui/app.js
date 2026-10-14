@@ -851,6 +851,8 @@ export class App {
     this.sound.volume = this.driveUI.s.volume;
     this.sound.setOn(this.driveUI.s.sound);
     this.sound.start();
+    setTimeout(() => this.drivingMode && this.sound.fx('doorclose', 0.7, 1), 500);
+    setTimeout(() => this.drivingMode && this.sound.fx('start', 0.6, this.world.driver.vehicle === 'semi' ? 0.8 : 1), 1500);
   }
 
   exitDrive() {
@@ -858,6 +860,7 @@ export class App {
     D.exit();
     this.drivingMode = false;
     this.sound?.update(760, 0, 0, 0, false);
+    this.sound?.fx('stop', 0.6, D.vehicle === 'semi' ? 0.8 : 1);
     this.root.classList.remove('driving');
     this.driveUI.hide();
     this.$('#driveBtn').setAttribute('aria-pressed', 'false');

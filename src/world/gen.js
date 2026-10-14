@@ -10,6 +10,7 @@
 // Seasons change only how the land is *drawn* (snow, ice, wet, tints), never what is here.
 import { hash2, fbm, ridged, clamp, lerp, smoothstep, prng } from './noise.js';
 import { CITY_NAMES, TOWN_NAMES, makeName } from './names.js';
+import { SHOULDER, planHighway, lotArrays, lotAt } from './highway.js';
 
 export const S = 2200; // node spacing (m)
 const LS = 3600; // lake cell (m)
@@ -582,7 +583,17 @@ export class World {
       for (let k = 1; k < n - 1; k++) hs[k] = clamp(hs[k], hs[k - 1] - gmax, hs[k - 1] + gmax);
       for (let k = n - 2; k >= 1; k--) hs[k] = clamp(hs[k], hs[k + 1] - gmax, hs[k + 1] + gmax);
     }
-    return { id: `${i},${j},${dir}`, i, j, dir, cls, P, a, b, n, xs, zs, hs, ss, len: total, name: this.roadName(i, j, dir, cls) };
+    const e = { id: `${i},${j},${dir}`, i, j, dir, cls, P, a, b, n, xs, zs, hs, ss, len: total, name: this.roadName(i, j, dir, cls) };
+    // highway furnishing: paved shoulders plus rest areas, weigh stations, runaway ramps and interchange lanes
+    const plan = planHighway(e);
+    const la = lotArrays(plan.lots, ss, n);
+    e.sh = SHOULDER[cls] || 0;
+    e.lots = plan.lots;
+    e.overpasses = plan.overpasses;
+    e.runaway = plan.runaway;
+    e.lotR = la ? la.R : null;
+    e.lotL = la ? la.L : null;
+    return e;
   }
 
   indexEdge(e) {
@@ -674,6 +685,15 @@ export class World {
     return out;
   }
 
+  /** Half-width of the paved surface at a roadAt() hit: lanes, shoulder and any lot on that side. */
+  reachOf(r) {
+    const e = r.edge;
+    let w = e.P.width / 2 + e.sh;
+    const arr = r.side > 0 ? e.lotR : e.lotL;
+    if (arr) w += arr[r.k] + (arr[r.k + 1] - arr[r.k]) * r.t;
+    return w;
+  }
+
   // ── Composite height ───────────────────────────────────────────────────────
   plateau(x, z, h) {
     const a = Math.floor(x / S), b = Math.floor(z / S);
@@ -698,7 +718,7 @@ export class World {
     let h = this.plateau(x, z, this.baseHeight(x, z));
     const r = this.roadAt(x, z, this._rq);
     if (r) {
-      const hw = r.edge.P.width / 2 + 1.2;
+      const hw = this.reachOf(r) + 1.2;
       if (r.d < hw + 36) {
         const bw = clamp(Math.abs(h - r.y) * 2, 7, 36);
         h = lerp(h, r.y, 1 - smoothstep(hw, hw + bw, r.d));
@@ -719,7 +739,11 @@ export class World {
       }
     }
     const r = this.roadAt(x, z, this._rq);
-    if (r && r.d < r.edge.P.width / 2 + 0.3) return { kind: 'road', cls: r.edge.cls, depth: 0, h, base, road: r };
+    if (r && r.d < this.reachOf(r) + 0.3) {
+      const e = r.edge;
+      const lot = r.d > e.P.width / 2 + e.sh + 0.3 ? lotAt(e.lots, r.side > 0 ? 1 : -1, e.ss[r.k] + r.t * (e.ss[r.k + 1] - e.ss[r.k])) : null;
+      return { kind: 'road', cls: lot && lot.kind === 'runaway' ? 'gravel' : e.cls, lot: lot ? lot.kind : null, depth: 0, h, base, road: r };
+    }
     const n = this.settlementAt(x, z, 0);
     if (n) {
       const st = this.streetAt(n, x, z);

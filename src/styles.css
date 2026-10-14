@@ -489,3 +489,56 @@ h2.title { margin: 0; font-family: var(--f-display); font-weight: 600; font-size
 .dh-sub { display: block; margin-top: 8px; font-size: 12px; color: var(--muted); }
 #driveHud.semi .dh-aux { max-width: 232px; flex-direction: row; flex-wrap: wrap-reverse; justify-content: flex-end; }
 @media (max-width: 560px) { .dh-warn { top: 120px; font-size: 12px; } #driveHud.semi .dh-aux { max-width: 150px; } }
+
+/* ── freight jobs (src/ui/jobs.js) ───────────────────────────────────────────────────────────── */
+.dh-job { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 12px; padding: 7px 10px; box-shadow: var(--shadow); backdrop-filter: blur(10px); cursor: pointer; }
+.dh-job.late { border-left-color: var(--crit); }
+.dh-job.paused { opacity: .75; border-left-color: var(--muted); }
+.jb-ic { flex: none; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; background: var(--raise); font-size: 20px; }
+.jb-tx { min-width: 0; display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.jb-tx b { font-size: 13.5px; line-height: 1.2; }
+.jb-tx span { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jb-t { flex: none; font-style: normal; font-family: var(--f-data); font-size: 14px; font-weight: 700; }
+.dh-job.late .jb-t { color: var(--crit); }
+#dhJobsBtn.active { border-color: var(--accent); color: var(--accent); }
+.dh-jobs h4 { margin: 12px 0 6px; font-family: var(--f-display); font-size: 14px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.jb-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.jb-top h4 { margin: 8px 0 4px; }
+.jb-chips { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 8px; scroll-snap-type: x proximity; }
+.jb-chips .dh-btn { flex: none; scroll-snap-align: start; min-height: 34px; }
+.jb-chips .dh-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.jb-list { display: grid; gap: 8px; }
+.jb-job { border: 1px solid var(--line); background: var(--raise); border-radius: 10px; padding: 8px 10px; display: grid; gap: 5px; }
+.jb-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.jb-h b { font-size: 14px; }
+.jb-pay { font-family: var(--f-display); font-size: 20px; color: var(--good); }
+.jb-route { margin: 0; display: grid; grid-template-columns: 1fr auto 1fr; gap: 6px; align-items: center; font-size: 12px; }
+.jb-route span { display: flex; flex-direction: column; min-width: 0; font-weight: 600; }
+.jb-route small { font-weight: 400; color: var(--muted); font-size: 10.5px; }
+.jb-route i { font-style: normal; color: var(--muted); }
+.jb-meta { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11.5px; color: var(--muted); }
+.jb-tag { font-weight: 700; }
+.jb-tag.hazmat { color: var(--crit); }
+.jb-tag.fragile { color: var(--warn); }
+.jb-tag.urgent { color: var(--info); }
+.jb-b { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.jb-b .dh-btn { min-height: 40px; }
+.jb-state { font-size: 12.5px; margin: 8px 0 0; }
+.jb-rec { font-size: 12px; margin: 0; }
+.dh-jobsum { left: 50%; right: auto; top: 50%; transform: translate(-50%, -50%); width: min(420px, calc(100% - 28px)); z-index: 6; }
+.jb-sumh { margin: 6px 0 8px; font-size: 14px; font-weight: 600; }
+.jb-sumh small { font-weight: 400; color: var(--muted); font-size: 11.5px; }
+.jb-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.jb-tbl td { padding: 5px 2px; border-bottom: 1px solid var(--line); }
+.jb-tbl td:last-child { text-align: right; font-family: var(--f-data); }
+.jb-tbl .neg td:last-child { color: var(--crit); }
+.jb-tbl .pos td:last-child { color: var(--good); }
+.jb-tbl .tot td { font-weight: 700; font-size: 16px; border-bottom: 0; padding-top: 9px; }
+@media (max-width: 560px) {
+  .dh-job { padding: 5px 8px; }
+  .jb-ic { width: 30px; height: 30px; font-size: 17px; }
+  .jb-route { grid-template-columns: 1fr; }
+  .jb-route i { display: none; }
+  .dh-jobsum { top: 50px; transform: translateX(-50%); max-height: calc(100% - 66px); }
+}
+@media (max-width: 560px) { .dh-jobs .dh-sh-top, .dh-jobsum .dh-sh-top { padding-right: 46px; } }

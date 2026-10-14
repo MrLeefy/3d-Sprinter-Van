@@ -5,6 +5,7 @@ import { drawWorldMap } from './mapview.js';
 import { KIND_LABEL, S } from '../world/gen.js';
 import { layoutOf } from '../world/layout.js';
 import { planRoute, bearing } from '../world/route.js';
+import { depotOf } from '../world/jobs.js';
 
 const ICON = { fuel: '⛽', water: '🚰', dump: '♻', camp: '⛺', shop: '🛒' };
 const TURN_ICON = { left: '↰', right: '↱', straight: '↑', arrive: '⚑', depart: '↑', enter: '⌂' };
@@ -245,6 +246,7 @@ export class MapScreen {
     this.card.innerHTML = `<div class="mc-h"><b>${n.name}</b><span>${KIND_LABEL[n.kind] || n.kind}${visited ? ' · visited ✓' : ''}</span></div>
       <p>${n.pop ? `Pop. ${n.pop.toLocaleString('en-US')} · ` : ''}elev. ${ft} ft · ${fmtDistance(dist, this.units)} as the crow flies</p>
       ${sv.length ? `<p class="mc-sv">${sv.join(' &nbsp; ')}</p>` : ''}
+      ${depotOf(this.W, n) ? `<p class="mc-sv">${depotOf(this.W, n).icon} ${depotOf(this.W, n).company} · ${depotOf(this.W, n).label} (freight depot)</p>` : ''}
       <div class="mc-b"><button class="dh-btn primary" id="mcGo">Navigate</button><button class="dh-btn" id="mcWp">Waypoint</button><button class="dh-btn" id="mcX">Close</button></div>`;
     this.card.querySelector('#mcGo').addEventListener('click', () => {
       this.navigate(n);
@@ -279,7 +281,7 @@ export class MapScreen {
     this.dirty = true;
   }
 
-  navigate(n) {
+  navigate(n, quiet = false) {
     const D = this.D;
     const t0 = performance.now();
     const r = planRoute(this.W, { x: D.x, z: D.z }, n);
@@ -298,7 +300,7 @@ export class MapScreen {
     this.ptsN = 0;
     this.syncPts();
     const dist = r.length || Math.hypot(n.x - D.x, n.z - D.z) * 1.2;
-    this.app.toast(`Route to ${n.name}: about ${fmtDistance(Math.max(dist, r.time * 20), this.units)}, ${fmtTime(r.time)}. Follow the blue line.`);
+    if (!quiet) this.app.toast(`Route to ${n.name}: about ${fmtDistance(Math.max(dist, r.time * 20), this.units)}, ${fmtTime(r.time)}. Follow the blue line.`);
     void t0;
     this.dirty = true;
   }
@@ -412,7 +414,7 @@ export class MapScreen {
     drawWorldMap(g, W, {
       w: cv.width / dpr, h: cv.height / dpr, cx: this.cx, cz: this.cz, mpp: this.mpp, van: { x: D.x, z: D.z, yaw: D.yaw }, trail: D.trail, home: W.home, labels: true,
       frozen: this.ui.world.terrain.season.u.uIce.value > 0.5, accent: getComputedStyle(this.app.root).getPropertyValue('--accent') || '#ff8a3d',
-      route: this.pts, waypoint: this.waypoint, visited: this.ui.passport?.visited, pois: this.ui.passport?.mapPois(), bg: '#26362a',
+      route: this.pts, waypoint: this.waypoint || this.ui.jobs?.mapTarget(), visited: this.ui.passport?.visited, pois: [...(this.ui.passport?.mapPois() || []), ...(this.ui.jobs?.mapPois() || [])], bg: '#26362a',
     });
     this.dirty = false;
   }

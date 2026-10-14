@@ -6,7 +6,7 @@ import { loadPBR } from './materials.js';
 import { GLSL_NOISE } from './season.js';
 
 // Road surface class ids (aRoad.z)
-export const RC = { interstate: 1, highway: 2, county: 3, gravel: 4, dirt: 5, street: 6, sidewalk: 7, pavement: 8, lawn: 9 };
+export const RC = { interstate: 1, highway: 2, county: 3, gravel: 4, dirt: 5, street: 6, sidewalk: 7, pavement: 8, lawn: 9, lot: 10 };
 
 export function makeTerrainMaterial(season) {
   const g = loadPBR('aerial_grass_rock', { repeat: 1 / 7, normalScale: 0.9 });
@@ -55,7 +55,7 @@ export function makeTerrainMaterial(season) {
           vec2 ff = fract(wp / cs);
           float fh = h21(fcell + 3.1);
           float ang = h21(fcell + 9.7) < 0.5 ? 0.0 : 1.5708;
-          float rows = 0.93 + 0.07 * sin(dot(wp, vec2(cos(ang), sin(ang))) * 2.6);
+          float rows = 0.86 + 0.14 * sin(dot(wp, vec2(cos(ang), sin(ang))) * 2.6);
           vec3 crop = fh < 0.26 ? L3(vec3(0.66, 0.55, 0.24)) : fh < 0.5 ? L3(vec3(0.33, 0.50, 0.17)) : fh < 0.66 ? L3(vec3(0.36, 0.27, 0.18)) : fh < 0.82 ? L3(vec3(0.50, 0.58, 0.25)) : grass;
           crop = (fh >= 0.82 ? crop : crop * uCropTint * rows) * (0.9 + 0.2 * vn(wp / 9.0));
           float edge = smoothstep(0.0, 0.012, ff.x) * smoothstep(0.0, 0.012, 1.0 - ff.x) * smoothstep(0.0, 0.01, ff.y) * smoothstep(0.0, 0.01, 1.0 - ff.y);
@@ -103,12 +103,12 @@ export function makeRoadMaterial(season, { far = false } = {}) {
         vec3 col = vec3(0.1);
         float rRough = 0.92;
         float wear = 0.0;
-        float paved = (cls < 3.5 || cls == 6.0 || cls == 8.0) ? 1.0 : 0.0;
+        float paved = (cls < 3.5 || cls == 6.0 || cls == 8.0 || cls == 10.0) ? 1.0 : 0.0;
         if (paved > 0.5) {
           col = vec3(0.085 + 0.05 * gr);
           float lanes = cls == 1.0 ? 3.65 : cls == 2.0 ? 3.5 : 3.3;
           float lc = abs(fract(rm / lanes) - 0.5) * lanes;
-          wear = exp(-pow((lc - 0.85) / 0.35, 2.0)) * (cls == 8.0 ? 0.0 : 1.0);
+          wear = exp(-pow((lc - 0.85) / 0.35, 2.0)) * (cls == 8.0 || cls == 10.0 ? 0.0 : 1.0);
           col *= 1.0 - 0.2 * wear;
           rRough = 0.9 - 0.14 * wear;
           vec3 yellow = vec3(0.84, 0.64, 0.08);
@@ -119,12 +119,19 @@ export function makeRoadMaterial(season, { far = false } = {}) {
           float dash = step(fract(rs / 12.0), 0.33);
           if (cls == 1.0) {
             yel = step(abs(rm - 0.22), 0.065);
-            wht = step(abs(rm - 3.65), 0.075) * dash + step(abs(rm - (wd * 0.5 - 1.2)), 0.1);
+            // dashed lane line at 3.65 m, solid edge line at 7.3 m, then a paved shoulder with a milled rumble strip
+            wht = step(abs(rm - 3.65), 0.075) * dash + step(abs(rm - 7.3), 0.1);
+            float shoulder = step(7.42, rm);
+            col *= 1.0 + 0.3 * shoulder;
+            col *= 1.0 - 0.3 * shoulder * step(rm, 8.1) * step(fract(rs / 0.5), 0.45);
           } else if (cls == 2.0) {
             float solid = step(0.35, h21(vec2(floor(rs / 160.0), 4.0)));
             float d2 = step(fract(rs / 9.0), 0.3);
             yel = step(abs(rm - 0.14), 0.055) * (solid + (1.0 - solid) * d2);
             wht = step(abs(rm - 3.8), 0.075);
+            float shoulder = step(3.92, rm);
+            col *= 1.0 + 0.25 * shoulder;
+            col *= 1.0 - 0.3 * shoulder * step(rm, 4.5) * step(fract(rs / 0.5), 0.45);
           } else if (cls == 3.0) {
             yel = step(rm, 0.06) * step(fract(rs / 10.0), 0.3);
           } else if (cls == 6.0) {
@@ -132,11 +139,18 @@ export function makeRoadMaterial(season, { far = false } = {}) {
             else yel = step(rm, 0.06) * step(fract(rs / 8.0), 0.4);
           } else if (cls == 8.0) {
             col *= 0.8 + 0.3 * vn(vec2(rs, sm) * 0.35);
+          } else if (cls == 10.0) {
+            // rest area / weigh station / auxiliary lane: aged asphalt, parking-stall ticks, painted edge
+            col *= 1.18 + 0.2 * gr;
+            float lw = wd * 0.5;
+            wht = step(rm, 0.1) * step(lw, 5.0) * step(fract(rs / 9.0), 0.4);
+            wht += step(fract(rs / 3.7), 0.04) * step(2.0, rm) * step(rm, lw - 4.0) * step(9.0, lw);
+            wht += step(abs(rm - lw), 0.07) * step(9.0, lw);
           }
           col = mix(col, yellow, yel * fade);
           col = mix(col, white, wht * fade);
           rRough = mix(rRough, 0.62, max(yel, wht));
-          col = mix(col, L3(vec3(0.30, 0.27, 0.20)), smoothstep(wd * 0.5 - 0.8, wd * 0.5, rm) * (cls == 6.0 || cls == 8.0 ? 0.0 : 1.0));
+          col = mix(col, L3(vec3(0.30, 0.27, 0.20)), smoothstep(wd * 0.5 - 0.8, wd * 0.5, rm) * (cls == 6.0 || cls == 8.0 || cls == 10.0 ? 0.0 : 1.0));
         } else if (cls == 7.0) {
           col = L3(vec3(0.56, 0.55, 0.52)) * (0.88 + 0.14 * gr);
           col *= 1.0 - 0.25 * step(fract(rs / 1.7), 0.02);

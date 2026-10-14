@@ -9,6 +9,8 @@ import { Towns } from './towns.js';
 import { Roadside } from './roadside.js';
 import { prng, hash2, smoothstep } from '../world/noise.js';
 import { ROAD } from '../world/gen.js';
+import { LOT } from '../world/highway.js';
+import { Ridges } from './ridges.js';
 
 export const CHUNK = 48;
 const SEG = 24;
@@ -42,6 +44,7 @@ export const SURFACES = {
   packed: { label: 'Packed snow', crr: 0.025, mu: 0.36 },
   plowed: { label: 'Snowy highway', crr: 0.016, mu: 0.5 },
   ice: { label: 'Lake ice', crr: 0.012, mu: 0.12 },
+  arrester: { label: 'Runaway ramp bed', crr: 0.2, mu: 0.6 },
   shallow: { label: 'Shallow water', crr: 0.12, mu: 0.45 },
   water: { label: 'Deep water', crr: 0.3, mu: 0.1 },
 };
@@ -81,6 +84,34 @@ function ribbon(e, k0, k1, w, dy, ox, oz, P, N, R, I) {
   // quad (L0, R0, L1, R1) → two triangles facing up
   I.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
 }
+
+/** Lot ribbon (rest area, weigh station, auxiliary lane, runaway bed) beside segment k0 of edge e on one side. */
+function lotRibbon(e, k, side, ox, oz, dy, P, N, R, I) {
+  const arr = side > 0 ? e.lotR : e.lotL;
+  if (!arr || (arr[k] < 0.02 && arr[k + 1] < 0.02)) return;
+  const cls = RC[lotCls(e, k, side)];
+  const base = P.length / 3;
+  const half = e.P.width / 2 + e.sh;
+  for (const kk of [k, k + 1]) {
+    const a = Math.max(0, kk - 1), b = Math.min(e.n - 1, kk + 1);
+    const dx = e.xs[b] - e.xs[a], dz = e.zs[b] - e.zs[a], l = Math.hypot(dx, dz) || 1;
+    const rx = (-dz / l) * side, rz = (dx / l) * side;
+    const w = arr[kk];
+    const x = e.xs[kk] - ox, z = e.zs[kk] - oz, y = e.hs[kk] + dy;
+    for (const o of [0, 1]) {
+      const off = half + o * w;
+      P.push(x + rx * off, y, z + rz * off);
+      N.push(0, 1, 0);
+      R.push(o, e.ss[kk], cls, Math.max(0.01, w * 2));
+    }
+  }
+  I.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+}
+const lotCls = (e, k, side) => {
+  const s = (e.ss[k] + e.ss[k + 1]) / 2;
+  for (const l of e.lots) if (l.side === side && s > l.s0 && s < l.s1) return LOT[l.kind].cls;
+  return 'lot';
+};
 
 function ribbonGeometry(P, N, R, I) {
   if (!P.length) return null;
@@ -145,6 +176,7 @@ export class Land {
     this.season.listeners.push(() => this.onSeason());
     this.towns = new Towns(this, world, stage);
     this.roadside = new Roadside(this, world, stage, this.towns);
+    this.ridges = new Ridges(this, stage);
     this.applySeason();
     this.scatterDirty = false;
     this.pendingEdges = 0;
@@ -217,6 +249,7 @@ export class Land {
       return out(w.depth < 0.55 ? 'shallow' : 'water', { depth: w.depth });
     }
     if (w.kind === 'road') {
+      if (w.lot === 'runaway') return out('arrester');
       if (w.cls === 'interstate' || w.cls === 'highway') return out(snowy ? 'plowed' : 'asphalt', wet ? { mu: SURFACES.asphalt.mu * 0.72 } : {});
       if (w.cls === 'county') return out(snowy ? 'packed' : 'county', wet && !snowy ? { mu: SURFACES.county.mu * 0.72 } : {});
       if (w.cls === 'gravel') return out(snowy ? 'packed' : wet ? 'mud' : 'gravel', wet && !snowy ? { mu: 0.45 } : {});
@@ -291,6 +324,7 @@ export class Land {
     }
     this.towns?.update(x, z, sync);
     this.roadside?.update(x, z, sync);
+    this.ridges?.update(x, z);
   }
 
   /** Build everything now (used for screenshots and tests; the app streams progressively). */
@@ -383,7 +417,13 @@ export class Land {
     this.envRoot.add(mesh);
     // roads
     const P = [], N = [], R = [], I = [];
-    for (const { e, k } of this.world.segsIn(x0 - 4, z0 - 4, x0 + CHUNK + 4, z0 + CHUNK + 4)) ribbon(e, k, k + 1, e.P.width, 0.07, x0, z0, P, N, R, I);
+    for (const { e, k } of this.world.segsIn(x0 - 4, z0 - 4, x0 + CHUNK + 4, z0 + CHUNK + 4)) {
+      ribbon(e, k, k + 1, e.P.width + 2 * e.sh, 0.07, x0, z0, P, N, R, I);
+      if (e.lotR || e.lotL) {
+        lotRibbon(e, k, 1, x0, z0, 0.07, P, N, R, I);
+        lotRibbon(e, k, -1, x0, z0, 0.07, P, N, R, I);
+      }
+    }
     const rg = ribbonGeometry(P, N, R, I);
     let road = null;
     if (rg) {
@@ -412,7 +452,7 @@ export class Land {
     const P = [], N = [], R = [], I = [];
     for (const { e, k } of this.world.segsIn(x0 - 4, z0 - 4, x0 + FAR + 4, z0 + FAR + 4)) {
       if (k % 3 !== 0) continue;
-      ribbon(e, k, Math.min(e.n - 1, k + 3), Math.max(e.P.width, 9), -FAR_DROP + 0.06, x0, z0, P, N, R, I);
+      ribbon(e, k, Math.min(e.n - 1, k + 3), Math.max(e.P.width + 2 * e.sh, 9), -FAR_DROP + 0.06, x0, z0, P, N, R, I);
     }
     const rg = ribbonGeometry(P, N, R, I);
     let road = null;
@@ -478,7 +518,7 @@ export class Land {
     const bio = {};
     const free = (x, z, roadGap) => {
       const r = W.roadAt(x, z);
-      if (r && r.d < r.edge.P.width / 2 + roadGap) return null;
+      if (r && r.d < W.reachOf(r) + roadGap) return null;
       if (W.settlementAt(x, z, 24)) return null;
       for (const p of W.pads) if (Math.hypot(x - p.x, z - p.z) < p.r + 16) return null; // keep the camp clear
       const h = W.heightAt(x, z);
@@ -515,7 +555,7 @@ export class Land {
     for (let i = 0; i < 560; i++) {
       const x = x0 + rnd() * CHUNK, z = z0 + rnd() * CHUNK;
       const r = W.roadAt(x, z);
-      if (r && r.d < r.edge.P.width / 2 + 1.4) continue;
+      if (r && r.d < W.reachOf(r) + 1.4) continue;
       if (W.settlementAt(x, z, 24)) continue;
       if (W.pads.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + 3)) continue;
       const h = W.heightAt(x, z);
@@ -599,6 +639,7 @@ export class Land {
     this.scatter.visible = !mat;
     if (this.towns) this.towns.setMaterial?.(mat);
     this.roadside?.setMaterial(mat);
+    this.ridges?.setVisible(!mat);
   }
 
   tick(dt) {
@@ -607,5 +648,6 @@ export class Land {
     const hi = this.stage.quality === 'high';
     this.conifers.castShadow = this.broads.castShadow = this.rocks.castShadow = this.boulders.castShadow = hi;
     this.towns?.tick?.(dt);
+    this.ridges?.tick();
   }
 }

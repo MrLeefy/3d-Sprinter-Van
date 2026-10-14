@@ -9,6 +9,7 @@ import { drawWorldMap } from './mapview.js';
 import { MapScreen } from './mapscreen.js';
 import { Services } from './services.js';
 import { Passport } from './passport.js';
+import { Jobs } from './jobs.js';
 import { SPEC, TRAILER_CARGO } from '../sim/truck.js';
 
 const KEY = 'sprinter-drive-v2';
@@ -49,6 +50,7 @@ export class DriveUI {
     this.mapScreen = new MapScreen(this);
     this.services = new Services(this);
     this.passport = new Passport(this);
+    this.jobs = new Jobs(this); // freight job board (registers itself in ui.modules)
     this.D.onSight = () => this.passport.sawAnimal();
     this.apply(true);
   }
@@ -305,7 +307,10 @@ export class DriveUI {
       else if (k === 'cruise') A.toast(D.cruise.on ? `Cruise set to ${this.fmtSpeed(D.cruise.v * 3.6)} — brake to cancel, + / − to adjust.` : 'Cruise off.');
       else if (k === 'limiter') A.toast(D.limiter ? 'Limiter on — the van will hold the posted limit.' : 'Limiter off.');
       else if (k === 'gear') A.toast(D.gearSel === 'R' ? 'Reverse — Go now backs up.' : 'Drive.');
-      else if (k === 'park') A.toast(D.parkBrake ? 'Parking brake set.' : 'Parking brake released.');
+      else if (k === 'park') {
+        A.sound?.fx('parkbrake', 0.8, 0.9);
+        A.toast(D.parkBrake ? 'Parking brake set.' : 'Parking brake released.');
+      }
       else if (k === 'enginebrake') A.toast(D.rig.engineBrake ? 'Engine brake on — it slows the rig on downhills when you lift off.' : 'Engine brake off.');
       else if (k === 'auto') A.toast(D.rig.auto ? 'Automatic shifting.' : 'Manual — X shifts up, Z shifts down.');
       this.syncSemi();
@@ -330,6 +335,12 @@ export class DriveUI {
     if (this.s.haptics && navigator.vibrate) {
       if (kind === 'building' || kind === 'tree' || kind === 'boulder') navigator.vibrate([70, 30, 40]);
       else if (kind === 'slide') navigator.vibrate(25);
+    }
+    const snd = this.app.sound;
+    if (snd) {
+      const heavy = this.D.vehicle === 'semi';
+      if (['tree', 'boulder', 'building', 'crash', 'animal', 'rollover', 'jackknife'].includes(kind)) snd.fx('impact', kind, Math.max(4, this.D.hitSpeed || Math.abs(this.D.v)), heavy);
+      else if (kind === 'recovered') snd.fx('doorclose', 1, 0.8);
     }
     if (kind === 'animal') this.services?.penalty(120, 'repairs');
     if (kind === 'crash') this.services?.penalty(60, 'a fender-bender');
@@ -492,7 +503,9 @@ export class DriveUI {
       if (this.lastBrakeP > 0.35 && bp < 0.08) A.sound?.hiss(Math.min(1, this.lastBrakeP));
       this.lastBrakeP = bp;
     }
-    A.sound?.update(rpm, thr, Math.abs(D.v), D.surface.kind === 'road' || D.surface.kind === 'street' ? 0 : 1, true, Math.max(D.slip * 0.8, D.lock, D.spinning * 0.5));
+    const jake = semi && D.rig.engineBrake && thr < 0.05 && D.rig.gear > 0 && Math.abs(D.v) > 6 ? Math.min(1, D.rig.rpm / 1800) : 0;
+    A.sound?.update(rpm, thr, Math.abs(D.v), D.surface.kind === 'road' || D.surface.kind === 'street' ? 0 : 1, true, Math.max(D.slip * 0.8, D.lock, D.spinning * 0.5), { jake });
+    this.tickAmbience(dt);
     // badges
     this.$('#dhCruise').setAttribute('aria-pressed', String(D.cruise.on));
     this.$('#dhCruise').textContent = D.cruise.on ? `Cruise ${this.s.units === 'mph' ? mph(D.cruise.v * 3.6) : Math.round(D.cruise.v * 3.6)}` : 'Cruise';
@@ -535,6 +548,21 @@ export class DriveUI {
     this.root.classList.toggle('orbit', D.camMode === 'orbit');
     if (this.hintT > 0 && (this.hintT -= dt) <= 0) this.$('.dh-hint').classList.add('gone');
     for (const m of this.modules) m.tick?.(dt, this);
+  }
+
+  /** Mix the recorded ambience from the scene (4 Hz). */
+  tickAmbience(dt) {
+    this.ambT = (this.ambT || 0) - dt;
+    if (this.ambT > 0) return;
+    this.ambT = 0.25;
+    const A = this.app, D = this.D, st = this.world.stage;
+    const sound = A.sound;
+    if (!sound?.sfx) return;
+    const sun = st.sunScene.y;
+    const day = Math.max(0, Math.min(1, (sun + 0.04) / 0.16)) * (st.night ? 0 : 1);
+    const town = D.surface.kind === 'street' ? 1 : 0;
+    const winter = this.world.terrain.season.u.uIce.value > 0.5 || this.world.terrain.season.u.uSnow?.value > 0.5;
+    sound.sfx.ambience({ speed: Math.abs(D.v), day, rain: st.rain.visible ? 1 : 0, snow: st.snow.visible ? 1 : 0, town, summer: winter ? 0.15 : 1, cab: D.camMode === 'cockpit' ? 1 : 0 });
   }
 
   /** Truck gauges and warnings (4 Hz). */

@@ -597,105 +597,192 @@ export function buildTractor({ sleeper = true, wheels = 'separate', detail = 1 }
   const T = TRACTOR;
   const vb = new VB();
   const sg = [-1, 1];
-  // chassis
-  for (const s of sg) vb.box(T.rearX, T.bumperX - 0.35, 0.86, 1.12, s * 0.46 - 0.06, s * 0.46 + 0.06, FRAME);
+  const HALF = 1.25; // cab half-width
+  const ALU = { col: COL.alu, kind: KIND.CHROME };
+  const STEEL = { col: COL.steel, kind: KIND.CHROME };
+  const BODY = { col: [1, 1, 1], kind: KIND.PAINT, body: true };
+  const rub = { col: COL.rubber, kind: KIND.RUBBER };
+  const smooth = (g, a = 0.9) => toCreasedNormals(g, a);
+  const sleeperRoof = sleeper ? 3.52 : 3.3;
+  // ── chassis: rails, crossmembers, suspension, driveline ──
+  for (const s of sg) vb.box(T.rearX, T.bumperX - 0.35, 0.84, 1.12, s * 0.46 - 0.06, s * 0.46 + 0.06, FRAME);
   vb.box(T.rearX, T.bumperX - 0.35, 0.86, 0.9, -0.5, 0.5, FRAME);
-  for (const x of [0, 2.2, 3.9, 5.3]) vb.box(x - 0.08, x + 0.08, 0.9, 1.08, -0.5, 0.5, FRAME);
-  // axles, differentials and the steer axle beam
+  for (const x of [-0.9, 0, 1.3, 2.2, 3.9, 5.3]) vb.box(x - 0.08, x + 0.08, 0.9, 1.08, -0.5, 0.5, FRAME);
+  vb.cyl(1.7, 0.9, 0, 0.07, 3.4, 'x', { col: COL.dark, kind: KIND.METAL }, 10); // driveshaft
+  vb.rbox(3.4, 1.0, 0, 1.0, 0.5, 0.55, 0.08, { col: COL.dark, kind: KIND.METAL }); // engine / transmission underside
   for (const x of T.driveX) {
     vb.cyl(x, T.tyreR, 0, 0.09, 2.0, 'z', FRAME, 10);
     vb.rbox(x, T.tyreR, 0, 0.55, 0.5, 0.55, 0.12, FRAME);
   }
   vb.cyl(T.steerX, T.tyreR, 0, 0.07, 1.9, 'z', FRAME, 10);
-  vb.rbox(1.35, 0.55, 0, 2.2, 0.16, 0.22, 0.05, FRAME);
+  for (const s of sg) {
+    // tandem: walking beam, air bags, torque rods; steer: leaf spring and shocks
+    vb.rbox(0, 0.62, s * 0.62, 1.75, 0.16, 0.14, 0.04, FRAME);
+    for (const x of T.driveX) {
+      vb.cyl(x, 0.98, s * 0.62, 0.15, 0.3, 'y', rub, 14);
+      vb.cyl(x, 0.82, s * 0.62, 0.17, 0.05, 'y', FRAME, 14);
+    }
+    vb.rbox(-0.35, 0.78, s * 0.5, 1.2, 0.04, 0.05, 0.01, FRAME);
+    vb.rbox(T.steerX, 0.72, s * 0.5, 1.4, 0.07, 0.1, 0.03, FRAME);
+    vb.cyl(T.steerX + 0.35, 0.8, s * 0.45, 0.04, 0.5, 'y', { col: COL.red, kind: KIND.METAL }, 8);
+  }
   // fifth wheel
   vb.rbox(T.fifthX, T.fifthY - 0.06, 0, 1.25, 0.11, 1.18, 0.04, { col: COL.dark, kind: KIND.METAL });
   vb.rbox(T.fifthX + 0.1, T.fifthY + 0.01, 0, 0.9, 0.05, 1.0, 0.02, { col: COL.alu, kind: KIND.METAL });
   vb.box(T.fifthX - 0.55, T.fifthX + 0.1, T.fifthY - 0.01, T.fifthY + 0.04, -0.05, 0.05, { col: COL.black, kind: KIND.METAL });
   vb.rbox(T.fifthX - 0.2, T.fifthY - 0.3, 0, 1.4, 0.35, 0.8, 0.05, FRAME);
-  // fuel tanks, battery box, air tanks and steps
+  // ── cab + sleeper shell: one smooth extrusion ──
+  const prof = [[3.76, 1.3], [3.84, 1.5], [3.8, 2.3], [3.72, 3.1], [3.62, 3.27], [3.4, 3.32], [2.1, 3.34], [1.75, 3.37]];
+  if (sleeper) prof.push([1.35, 3.49], [0.9, sleeperRoof], [-0.7, sleeperRoof], [-0.96, 3.46], [-1.06, 3.15], [-1.08, 2.0], [-1.06, 1.3]);
+  else prof.push([1.65, 3.3], [1.55, 3.2], [1.5, 1.3]);
+  const rearX = sleeper ? -1.06 : 1.5;
+  const belt = 2.0, roofTop = sleeperRoof;
+  const widthAt = (x, y) => {
+    let s = 1;
+    if (y > belt) s = 1 - 0.035 * Math.min(1, (y - belt) / (roofTop - belt)); // tumblehome
+    if (x > 3.3) s *= 1 - 0.03 * Math.min(1, (x - 3.3) / 0.5); // rounded nose
+    const dx = rearX + 0.55 - x;
+    if (dx > 0) s *= Math.sqrt(Math.max(0.2, 1 - 0.45 * (dx / 0.55) ** 2)); // rounded rear corners in plan
+    return HALF * s;
+  };
+  {
+    const g = extrudeProfile(prof, HALF * 2, { bevel: 0.1, steps: 6 });
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i);
+      const z = p.getZ(i) * (widthAt(x, y) / HALF);
+      p.setXYZ(i, x, y - (y > 3.2 ? 0.05 * (z / HALF) ** 2 : 0), z);
+    }
+    vb.tr(smooth(g, 0.95), 0, 0, 0, BODY);
+  }
+  const zAt = (y, x) => widthAt(x, y);
+  // sleeper side details and cab skirts / fairings
   for (const s of sg) {
-    vb.cyl(2.55, 0.78, s * 1.08, 0.36, 1.7, 'x', { col: COL.alu, kind: KIND.CHROME }, 20);
-    for (const dx of [-0.65, 0.65]) vb.cyl(2.55 + dx, 0.78, s * 1.08, 0.372, 0.06, 'x', { col: COL.steel, kind: KIND.CHROME }, 20);
-    vb.cyl(2.55 + 0.85, 0.78, s * 1.08, 0.34, 0.05, 'x', FRAME, 16);
+    if (sleeper) {
+      vb.poly([[0.0, 2.5, s * (zAt(2.5, 0) + 0.012)], [1.15, 2.5, s * (zAt(2.5, 1.15) + 0.012)], [1.15, 2.98, s * (zAt(2.98, 1.15) + 0.012)], [0.0, 2.98, s * (zAt(2.98, 0) + 0.012)]], [0, 0, s], GLS);
+      vb.rbox(-0.55, 2.0, s * (zAt(2, -0.55) + 0.01), 0.4, 0.28, 0.02, 0.03, BLK); // vent
+      vb.rbox(0.5, 1.5, s * (zAt(1.5, 0.5) + 0.012), 1.6, 0.05, 0.02, 0.01, ALU); // side trim
+      vb.rbox(0.5, 1.62, s * (zAt(1.6, 0.5) + 0.003), 2.6, 0.1, 0.02, 0.02, BLK);
+    }
+    // fairing skirts below the cab
+    vb.rbox(1.0, 1.0, s * 1.2, 3.6, 0.28, 0.07, 0.025, { col: COL.black, kind: KIND.PLASTIC });
+    // door glass in a black frame; seams, handle and step
+    const door = [[2.64, 2.02], [2.64, 3.06], [3.42, 3.1], [3.7, 2.35], [3.72, 2.02]];
+    const zz = (y, x) => s * (zAt(y, x) + 0.012);
+    vb.poly(door.map(([x, y]) => [x, y, s * (zAt(y, x) + 0.005)]).map(([x, y, z]) => [(x - 3.1) * 1.05 + 3.1, (y - 2.55) * 1.05 + 2.55, z]), [0, 0, s], BLK);
+    vb.poly(door.map(([x, y]) => [x, y, zz(y, x)]), [0, 0, s], GLS);
+    vb.box(2.5, 2.54, 1.4, 3.3, s * (zAt(2.5, 2.52) - 0.004), s * (zAt(2.5, 2.52) + 0.012), BLK); // door rear seam
+    vb.box(3.72, 3.76, 1.4, 3.15, s * (zAt(2.5, 3.74) - 0.006), s * (zAt(2.5, 3.74) + 0.01), BLK);
+    vb.box(2.5, 3.76, 1.52, 1.56, s * (zAt(1.5, 3.0) - 0.004), s * (zAt(1.5, 3.0) + 0.01), BLK);
+    vb.rbox(2.78, 2.1, s * (zAt(2.1, 2.78) + 0.02), 0.2, 0.04, 0.05, 0.015, ALU);
+    for (const y of [1.28, 0.78]) vb.rbox(3.0, y, s * 1.32, 0.5, 0.05, 0.26, 0.015, { col: COL.alu, kind: KIND.METAL });
+    // mirrors on long arms
+    vb.cyl(3.42, 2.7, s * 1.46, 0.016, 0.45, 'z', ALU, 8);
+    vb.cyl(3.42, 1.95, s * 1.46, 0.016, 0.45, 'z', ALU, 8);
+    vb.rbox(3.42, 2.3, s * 1.72, 0.1, 0.62, 0.1, 0.03, BLK);
+    vb.rbox(3.42, 2.3, s * 1.668, 0.088, 0.56, 0.008, 0.003, { col: lin([0.5, 0.6, 0.7]), kind: KIND.GLASS });
+    vb.rbox(3.42, 1.78, s * 1.68, 0.14, 0.22, 0.07, 0.02, BLK);
+    for (const z of [-0.8, -0.4, 0, 0.4, 0.8]) vb.rbox(3.64, 3.33, z, 0.1, 0.07, 0.14, 0.02, { col: COL.amber, kind: KIND.LENS });
+    vb.rbox(3.0, 1.22, s * (zAt(1.2, 3.0) + 0.012), 0.35, 0.05, 0.03, 0.01, { col: COL.amber, kind: KIND.LENS });
+  }
+  // windshield: two panes, centre post, black frame
+  for (const s of sg) {
+    const x0 = (y) => 3.84 - ((y - 1.5) * 0.12) / 1.6;
+    const za = (y) => zAt(y, 3.7) - 0.1;
+    const A = [x0(1.98) + 0.012, 1.98, s * 0.05], B = [x0(1.98) + 0.012, 1.98, s * za(1.98)], C = [x0(3.1) + 0.012, 3.1, s * za(3.1)], D = [x0(3.1) + 0.012, 3.1, s * 0.05];
+    vb.face(A, B, C, D, [1, 0.08, 0], GLS);
+    vb.box(x0(2.5) - 0.01, x0(2.5) + 0.02, 1.9, 3.2, s * za(2.5) - (s > 0 ? 0 : -0.08), s * za(2.5) + (s > 0 ? 0.08 : 0), BLK);
+  }
+  vb.box(3.76, 3.86, 1.9, 3.18, -0.05, 0.05, BLK);
+  vb.box(3.74, 3.86, 1.86, 1.98, -1.16, 1.16, BLK); // cowl
+  vb.box(3.62, 3.76, 3.1, 3.2, -1.14, 1.14, BLK); // header
+  vb.rbox(3.82, 3.26, 0, 0.55, 0.1, 2.34, 0.04, BODY, 0, 0, -0.05); // sun visor
+  for (const s of sg) vb.tr(new THREE.BoxGeometry(0.012, 0.012, 0.8), 3.87, 2.05, s * 0.5, BLK, 0, 0, 0.1); // wipers
+  // roof air deflector with side extenders
+  if (sleeper) {
+    vb.tr(smooth(extrudeProfile([[3.5, 3.32], [3.66, 3.4], [3.1, 3.66], [1.7, 3.98], [1.05, 3.98], [0.85, 3.6]], 2.26, { bevel: 0.09, steps: 2 }), 0.9), 0, 0, 0, BODY);
+    for (const s of sg) vb.tr(extrudeProfile([[2.85, 3.3], [1.55, 3.3], [1.55, 3.92], [1.75, 3.9]], 0.05, { bevel: 0.01, steps: 1 }), 0, 0, s * 1.15, BODY);
+    vb.rbox(0.0, 3.54, 0, 0.5, 0.03, 0.4, 0.02, { col: COL.lens, kind: KIND.GLASS });
+  }
+  // ── hood: smooth block with crown, vents and a chrome grille ──
+  {
+    const hood = [[3.86, 1.1], [7.06, 1.1], [7.2, 1.25], [7.24, 1.85], [7.14, 2.03], [6.2, 2.08], [5.0, 2.15], [3.9, 2.24]];
+    const g = extrudeProfile(hood, 1.62, { bevel: 0.11, steps: 5 });
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), zf = p.getZ(i) / 0.81;
+      const taper = 1 - 0.06 * Math.max(0, Math.min(1, (x - 3.9) / 3.3));
+      p.setXYZ(i, x, y - (y > 1.9 ? 0.07 * zf * zf : 0), p.getZ(i) * taper);
+    }
+    vb.tr(smooth(g, 0.9), 0, 0, 0, BODY);
+  }
+  const hoodZ = (x) => 0.81 * (1 - 0.06 * Math.max(0, Math.min(1, (x - 3.9) / 3.3)));
+  for (const s of sg) {
+    for (let i = 0; i < 5; i++) vb.box(4.9 + i * 0.12, 4.92 + i * 0.12, 1.45, 1.95, s * (hoodZ(5) + 0.002), s * (hoodZ(5) + 0.016), BLK); // louvres
+    vb.box(4.0, 7.15, 1.12, 1.16, s * (hoodZ(5.5) - 0.002), s * (hoodZ(5.5) + 0.012), ALU);
+  }
+  vb.box(4.0, 7.0, 2.1, 2.14, -0.02, 0.02, ALU); // hood centre trim
+  vb.cyl(7.1, 2.18, 0, 0.012, 0.18, 'y', ALU, 6);
+  vb.rbox(7.1, 2.28, 0, 0.12, 0.03, 0.05, 0.01, ALU); // ornament
+  // grille: chrome surround, black mesh behind vertical bars
+  vb.rbox(7.255, 1.52, 0, 0.05, 0.98, 1.24, 0.05, ALU);
+  vb.rbox(7.28, 1.52, 0, 0.03, 0.8, 1.02, 0.02, { col: COL.black, kind: KIND.PLASTIC });
+  for (let i = -5; i <= 5; i++) vb.box(7.29, 7.33, 1.14, 1.9, i * 0.092 - 0.016, i * 0.092 + 0.016, STEEL);
+  vb.rbox(7.29, 1.52, 0, 0.04, 0.03, 1.05, 0.01, ALU);
+  vb.rbox(7.33, 1.52, 0, 0.03, 0.14, 0.22, 0.02, { col: COL.red, kind: KIND.PLASTIC }); // badge
+  // bumper, bull-bar guard, plate and tow hooks
+  vb.rbox(7.3, 0.82, 0, 0.2, 0.36, 2.45, 0.1, ALU);
+  for (const s of sg) vb.tr(new THREE.BoxGeometry(0.2, 0.34, 0.2), 7.22, 0.82, s * 1.2, { col: COL.alu, kind: KIND.CHROME }, 0, s * 0.6, 0);
+  vb.rbox(7.28, 0.55, 0, 0.12, 0.16, 2.2, 0.05, { col: COL.black, kind: KIND.PLASTIC });
+  vb.rbox(7.42, 0.86, 0, 0.02, 0.15, 0.3, 0.005, { col: COL.plate, kind: KIND.PLASTIC });
+  for (const s of sg) vb.cyl(7.3, 0.6, s * 0.55, 0.035, 0.12, 'x', { col: COL.red, kind: KIND.METAL }, 8);
+  // ── fenders, headlights, steps ──
+  for (const s of sg) {
+    const cx = T.steerX, cy = T.tyreR + 0.02, Ro = 0.74, Ri = 0.66;
+    const pts = [];
+    for (let i = 0; i <= 14; i++) pts.push([cx + Ro * Math.cos(0.1 + (i / 14) * (Math.PI - 0.2)), cy + Ro * Math.sin(0.1 + (i / 14) * (Math.PI - 0.2))]);
+    for (let i = 14; i >= 0; i--) pts.push([cx + Ri * Math.cos(0.1 + (i / 14) * (Math.PI - 0.2)), cy + Ri * Math.sin(0.1 + (i / 14) * (Math.PI - 0.2))]);
+    // flip so the outward end is at the front: points run front (angle ~0) to back (angle ~π)
+    vb.tr(smooth(extrudeProfile(pts, 0.58, { bevel: 0.03, steps: 1 }), 0.8), 0, 0, s * T.steerTrack, BODY);
+    vb.rbox(6.28, 1.3, s * 1.0, 1.7, 0.07, 0.62, 0.03, BODY); // flat fender top
+    vb.rbox(6.28, 1.34, s * 1.0, 1.72, 0.015, 0.2, 0.005, ALU);
+    // headlight bucket, lens and cornering lamp
+    vb.cyl(7.08, 1.42, s * 0.86, 0.17, 0.12, 'x', ALU, 18);
+    vb.cyl(7.145, 1.42, s * 0.86, 0.14, 0.04, 'x', { col: COL.lens, kind: KIND.LENS, glow: 1 }, 18);
+    vb.rbox(7.12, 1.12, s * 1.0, 0.07, 0.1, 0.16, 0.02, { col: COL.amber, kind: KIND.LENS, glow: 3 });
+    vb.rbox(7.2, 0.62, s * 0.68, 0.08, 0.1, 0.2, 0.02, { col: COL.lens, kind: KIND.LENS, glow: 1 });
+    // chrome exhaust: muffler, stack with heat shield, cap
+    const sx = 2.12, sz = s * 1.4;
+    vb.cyl(sx, 1.8, sz, 0.14, 1.2, 'y', ALU, 18);
+    vb.cyl(sx, 1.2, sz, 0.145, 0.04, 'y', STEEL, 18);
+    vb.cyl(sx, 3.1, sz, 0.07, 2.2, 'y', ALU, 14);
+    vb.cyl(sx, 4.17, sz, 0.075, 0.1, 'y', ALU, 14);
+    vb.tr(new THREE.CylinderGeometry(0.095, 0.07, 0.12, 14), sx, 4.25, sz, ALU, 0, 0, 0.5);
+    vb.rbox(sx - 0.04, 2.5, sz, 0.02, 1.2, 0.3, 0.01, { col: COL.steel, kind: KIND.METAL }); // heat shield
+    for (const y of [1.55, 2.0, 2.45, 2.9]) vb.cyl(sx, y, sz, 0.16, 0.03, 'y', STEEL, 14, 0.16); // brackets
+    // air cleaner on the cowl
+    vb.cyl(3.98, 2.55, s * 1.12, 0.1, 0.8, 'y', ALU, 14);
+    vb.cyl(3.98, 2.97, s * 1.12, 0.12, 0.05, 'y', ALU, 14);
+  }
+  // fuel tanks (chrome, strapped), battery box, air tanks and DEF
+  for (const s of sg) {
+    vb.cyl(2.5, 0.78, s * 1.08, 0.36, 1.7, 'x', ALU, 22);
+    for (const dx of [-0.65, 0.65]) vb.cyl(2.5 + dx, 0.78, s * 1.08, 0.372, 0.06, 'x', STEEL, 22);
+    for (const dx of [-0.25, 0.25]) vb.cyl(2.5 + dx, 0.78, s * 1.08, 0.368, 0.05, 'x', { col: COL.dark, kind: KIND.METAL }, 22);
+    vb.cyl(3.35, 0.78, s * 1.08, 0.3, 0.1, 'x', { col: COL.black, kind: KIND.PLASTIC }, 16);
     vb.rbox(1.2, 0.75, s * 1.0, 0.8, 0.5, 0.4, 0.04, FRAME);
     vb.cyl(-0.9, 0.62, s * 0.8, 0.17, 0.9, 'z', FRAME, 12, 0.17);
-    // steps
-    for (const [x, y] of [[2.1, 0.78], [2.1, 1.28]]) vb.rbox(x, y, s * 1.2, 0.4, 0.04, 0.2, 0.01, { col: COL.alu, kind: KIND.METAL });
   }
-  // sleeper cab and day cab
-  const cabX0 = 1.7, cabX1 = 3.75, cabY0 = 1.22;
-  const roofY = 3.28;
-  vb.rbox((cabX0 + cabX1) / 2, (cabY0 + roofY) / 2, 0, cabX1 - cabX0, roofY - cabY0, 2.5, 0.2, PAINT);
-  if (sleeper) {
-    vb.rbox(0.35, (cabY0 + 3.5) / 2, 0, 2.7, 3.5 - cabY0, 2.55, 0.22, PAINT);
-    // roof fairing / deflector: a wedge from the cab roof up to the sleeper roof
-    vb.tr(extrudeProfile([[3.72, 3.26], [3.8, 3.36], [2.3, 3.9], [1.3, 3.92], [1.0, 3.55], [3.7, 3.2]], 2.3, { bevel: 0.08, steps: 1 }), 0, 0, 0, PAINT);
-    // sleeper windows, vents and a skylight
-    for (const s of sg) {
-      vb.rbox(0.25, 2.55, s * 1.283, 1.1, 0.5, 0.012, 0.03, GLS);
-      vb.rbox(-0.55, 2.0, s * 1.283, 0.4, 0.25, 0.012, 0.03, BLK);
-      vb.box(1.2, 1.24, 1.4, 3.05, s * 1.262, s * 1.272, { col: COL.black, kind: KIND.PLASTIC });
-    }
-    vb.rbox(-0.2, 3.52, 0, 0.5, 0.03, 0.4, 0.02, { col: COL.lens, kind: KIND.GLASS });
-    for (const sd of sg) vb.cyl(-1.04, 2.3, sd * 0.85, 0.02, 1.4, 'y', CH, 8);
-  } else {
-    vb.rbox(cabX0 - 0.2, (cabY0 + 3.0) / 2, 0, 0.5, 3.0 - cabY0, 2.45, 0.14, PAINT);
-  }
-  // windshield (two panes), side glass, doors
+  // air lines to the trailer, cab-back lights and mud flaps
   for (const s of sg) {
-    vb.face([3.77, 1.98, s * 1.1], [3.77, 1.98, s * 0.04], [3.73, 3.12, s * 0.04], [3.73, 3.12, s * 1.1], [1, 0.1, 0], GLS);
-    vb.face([2.75, 1.88, s * 1.262], [2.75, 3.0, s * 1.262], [3.6, 3.0, s * 1.262], [3.7, 2.0, s * 1.262], [0, 0, s], GLS);
-    vb.box(2.7, 2.74, 1.25, 3.18, s * 1.252, s * 1.262, BLK);
-    vb.rbox(3.0, 2.0, s * 1.27, 0.2, 0.04, 0.05, 0.015, CH);
-    vb.rbox(3.0, 2.8, s * 1.27, 0.04, 0.1, 0.06, 0.015, CH);
-    // mirrors on long arms
-    vb.cyl(3.35, 2.55, s * 1.4, 0.014, 0.35, 'z', CH, 8);
-    vb.cyl(3.35, 1.95, s * 1.4, 0.014, 0.35, 'z', CH, 8);
-    vb.rbox(3.35, 2.25, s * 1.6, 0.1, 0.55, 0.09, 0.025, BLK);
-    vb.rbox(3.35, 2.25, s * 1.553, 0.085, 0.5, 0.006, 0.003, { col: lin([0.5, 0.6, 0.7]), kind: KIND.GLASS });
-    vb.rbox(3.35, 1.7, s * 1.55, 0.12, 0.2, 0.06, 0.02, BLK);
-    // cab marker lamps and roof lights
-    for (const z of [-0.8, -0.4, 0, 0.4, 0.8]) vb.rbox(3.62, roofY + 0.03, z, 0.1, 0.07, 0.14, 0.02, { col: COL.amber, kind: KIND.LENS });
-    vb.rbox(3.0, 1.2, s * 1.265, 0.35, 0.05, 0.03, 0.01, { col: COL.amber, kind: KIND.LENS });
+    for (let i = 0; i < 6; i++) vb.tr(new THREE.TorusGeometry(0.06, 0.012, 6, 12), -1.1, 2.05 - s * 0.06 + i * 0.0, s * 0.45 + i * 0.03, s > 0 ? { col: COL.red, kind: KIND.RUBBER } : { col: COL.amber, kind: KIND.RUBBER }, 0, Math.PI / 2, 0);
+    vb.rbox(-1.1, 1.7, s * 0.45, 0.06, 0.1, 0.1, 0.02, ALU); // gladhand
+    vb.rbox(-1.97, 0.95, s * 0.8, 0.08, 0.12, 0.22, 0.02, { col: COL.red, kind: KIND.LENS, glow: 2 });
+    vb.box(-1.55, -1.5, 0.15, 0.7, s * 0.55, s * 1.4, rub);
+    vb.rbox(-1.52, 0.5, s * 0.98, 0.04, 0.2, 0.2, 0.02, ALU);
   }
-  vb.rbox(3.78, 3.22, 0, 0.55, 0.1, 2.44, 0.04, PAINT, 0, 0, -0.04); // sun visor
-  vb.box(3.74, 3.76, 3.1, 3.2, -1.1, 1.1, BLK);
-  // hood, grille, fenders, bumper, lights
-  vb.rbox(5.3, 1.62, 0, 3.15, 0.95, 1.45, 0.2, PAINT);
-  vb.rbox(6.95, 1.5, 0, 0.3, 0.85, 1.3, 0.14, PAINT);
-  vb.rbox(7.12, 1.5, 0, 0.08, 0.95, 1.12, 0.05, { col: COL.alu, kind: KIND.CHROME });
-  for (let i = -5; i <= 5; i++) vb.box(7.16, 7.2, 1.08, 1.92, i * 0.095 - 0.012, i * 0.095 + 0.012, { col: COL.steel, kind: KIND.CHROME });
-  vb.rbox(7.18, 1.52, 0, 0.03, 0.8, 0.96, 0.02, { col: COL.black, kind: KIND.PLASTIC });
-  for (let i = -5; i <= 5; i++) vb.box(7.2, 7.24, 1.12, 1.9, i * 0.095 - 0.014, i * 0.095 + 0.014, { col: COL.steel, kind: KIND.CHROME });
-  vb.rbox(7.2, 1.98, 0, 0.1, 0.07, 0.6, 0.02, CH);
-  vb.rbox(7.28, 0.8, 0, 0.18, 0.34, 2.45, 0.1, { col: COL.alu, kind: KIND.CHROME });
-  vb.rbox(7.26, 0.55, 0, 0.12, 0.16, 2.2, 0.05, { col: COL.black, kind: KIND.PLASTIC });
-  for (const s of sg) {
-    // fenders over the steer tyres
-    vb.tr(new THREE.CylinderGeometry(0.66, 0.66, 0.5, 18, 1, false, Math.PI / 2, Math.PI), T.steerX, T.tyreR + 0.03, s * T.steerTrack, PAINT, Math.PI / 2, 0, 0, 1, 1, 1);
-    vb.rbox(T.steerX, 1.22, s * T.steerTrack, 1.4, 0.06, 0.52, 0.03, PAINT);
-    vb.rbox(6.55, 1.42, s * 0.92, 0.5, 0.36, 0.4, 0.07, PAINT);
-    // headlights, turn signals and wheel-well trim
-    vb.rbox(7.05, 1.38, s * 0.78, 0.12, 0.3, 0.28, 0.05, { col: COL.lens, kind: KIND.LENS, glow: 1 });
-    vb.rbox(7.08, 1.38, s * 0.78, 0.04, 0.34, 0.32, 0.03, CH);
-    vb.rbox(7.1, 1.13, s * 0.93, 0.07, 0.1, 0.12, 0.02, { col: COL.amber, kind: KIND.LENS, glow: 3 });
-    vb.rbox(7.16, 0.6, s * 0.68, 0.08, 0.1, 0.18, 0.02, { col: COL.lens, kind: KIND.LENS, glow: 1 });
-    // exhaust stacks and muffler
-    vb.cyl(1.56, 2.55, s * 1.12, 0.085, 2.4, 'y', CH, 14);
-    vb.cyl(1.56, 1.3, s * 1.12, 0.2, 0.6, 'y', { col: COL.steel, kind: KIND.CHROME }, 16);
-    vb.cyl(1.56, 3.78, s * 1.12, 0.09, 0.05, 'y', CH, 14);
-    vb.rbox(1.56, 3.5, s * 1.12, 0.05, 0.05, 0.05, 0.01, FRAME);
-    // air cleaner
-    vb.cyl(3.9, 2.3, s * 0.85, 0.11, 0.55, 'y', CH, 12);
-  }
-  // air horns, hoses and the cab-back light bar
-  vb.cyl(1.5, 3.6, 0, 0.03, 0.4, 'z', CH, 8);
-  vb.rbox(1.72, 2.0, 0.55, 0.02, 0.5, 0.12, 0.01, { col: COL.red, kind: KIND.PLASTIC });
-  vb.rbox(1.72, 1.9, -0.55, 0.02, 0.5, 0.12, 0.01, { col: COL.amber, kind: KIND.PLASTIC });
-  for (const s of sg) vb.rbox(-1.97, 0.95, s * 0.8, 0.08, 0.12, 0.22, 0.02, { col: COL.red, kind: KIND.LENS, glow: 2 });
-  // mud flaps behind the drive tyres
-  for (const s of sg) vb.box(-1.55, -1.5, 0.15, 0.7, s * 0.55, s * 1.4, { col: COL.black, kind: KIND.RUBBER });
+  vb.cyl(0.75, 3.52, 0, 0.03, 0.4, 'z', ALU, 8); // air horns on the roof
+  for (const s of sg) vb.rbox(-1.08, 2.7, s * 0.7, 0.02, 0.3, 0.5, 0.01, { col: COL.black, kind: KIND.PLASTIC });
   // wheel list for the rig
   const ws = [];
   for (const s of sg) ws.push({ x: T.steerX, y: T.tyreR, z: s * T.steerTrack, r: T.tyreR, w: T.tyreW, steer: true, side: s, axle: 'steer' });

@@ -274,11 +274,40 @@ temperatures. It is an estimate for explanation, not a measured image:
   deeper than about 0.6 m.
 - **Energy:** while the engine runs, the simulation charges the house bank from the two
   50 A DC-DC chargers and burns fuel at 0.9 L/h idle plus a speed term (≈ 12 L/100 km at
-  70–100 km/h).
+  70–100 km/h). Because settlements in the drive world are about 2 km apart instead of about
+  60 km, the drive-mode fuel burn is scaled ×14 (`ctrl.driveFuelScale`) so that a tank lasts
+  roughly half an hour of highway driving and refuelling at a pump is part of the game.
+- **Driver aids** (`ASSISTS`): *Easy* adds lane keeping (heading, lane-offset and a 1.3 s
+  curvature preview converted to a road-wheel angle through the inverse bicycle model),
+  traction control (torque capped at μ·m·g·0.62), stability control (lower yaw-rate cap),
+  soft pedal ramps and a curve-speed advisory (v ≤ √(0.42·μ·g/κ)); *Standard* has
+  speed-sensitive steering and partial traction control; *Pro* is the raw model.
+  Cruise control is a PI loop with light braking on long descents; the limiter holds the
+  posted limit (interstate 80 mph, highway 65, county 55, gravel 35, track 20, streets 25).
+- **Collisions** use four circles along the van's centre line against axis-aligned building
+  footprints, tree and boulder circles, roadside poles and props, traffic (circle chains) and
+  animals. Surfaces add shake: 0.75 m corrugations on gravel, ruts on tracks, tussocks on grass.
+
+### World generation (drive demonstration)
+
+`src/world/` is pure and deterministic from the seed (`new World(7)`). Settlement nodes sit on
+a 2.2 km grid with ±550 m jitter and a kind chosen from the region; each node flattens a
+plateau. Roads between neighbouring nodes are routed on a 26 m grid by A* (cost grows with
+slope², lakes and other towns blocked), smoothed with Chaikin, **relaxed with a Gaussian of
+σ = 95 / 62 / 34 / 18 / 8 m for interstate / highway / county / gravel / track** (rejected for a
+lighter pass if it would enter a lake or another town), resampled at 8 m and given a smoothed
+height profile with class grade limits (5.5 %, 7 %, 8.5 %, 11 %, 15 %) blended into the plateaus.
+`heightAt` composes base terrain, lakes, plateaus and road cut-and-fill; `roadAt` is a 64 m
+spatial hash. Seasons never touch this: the renderer applies a shared uniform "skin" only.
+
+GPS (`src/world/route.js`) runs A* over the settlement graph with planning speeds per class,
+joins the van to the nearest built road edge, and turns the node path into a polyline with
+manoeuvres (through a settlement: port → centre → port). `src/world/poi.js` places up to three
+roadside discoveries per road edge by hashing the edge id.
 
 ## 11. Acceptance tests
 
-`npm test` runs 85 node tests. Of the 76 engineering checks, 73 pass, 3 warn and 0 fail. They
+`npm test` runs 106 node tests (the acceptance suite plus world generation, town layout, routing and discovery tests). Of the 76 engineering checks, 73 pass, 3 warn and 0 fail. They
 cover component data, geometry (clashes, envelope, arches, service clearances, aisles, egress,
 ground clearance), moving assemblies and expansion clearances, weight and axle loads, electrical
 protection, voltage drop, peak current, inverter loading and PV limits, heating/cooling

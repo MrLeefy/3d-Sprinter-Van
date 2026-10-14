@@ -238,7 +238,7 @@ class Ground {
 }
 
 /** Street pieces between crossings + intersection patches, computed once per layout. */
-function streetPlan(L) {
+export function streetPlan(L) {
   if (L._plan) return L._plan;
   const axis = (s) => (Math.abs(s.az - s.bz) < 1e-6 ? 'h' : Math.abs(s.ax - s.bx) < 1e-6 ? 'v' : null);
   const plan = { pieces: [], patches: [] };

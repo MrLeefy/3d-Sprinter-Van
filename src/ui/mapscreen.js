@@ -373,7 +373,7 @@ export class MapScreen {
     if (!r.done) {
       ic.textContent = '…';
       main.textContent = 'Planning the route…';
-      sub.textContent = `to ${this.dst.name}`;
+      sub.textContent = `to ${this.dst.name || 'the junction'}`;
       return;
     }
     if (m) {

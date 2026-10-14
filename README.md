@@ -14,7 +14,7 @@ simulation models heat, humidity, CO₂, battery, water and diesel use. An accep
 ```bash
 npm install
 npm run dev           # interactive viewer at http://localhost:5173
-npm test              # 85 engineering acceptance tests (node --test)
+npm test              # 106 node tests: engineering acceptance + world, towns, routing (node --test)
 npm run report        # regenerate docs/ACCEPTANCE-REPORT.md
 npm run build         # static site in dist/
 npm run build:single  # one-file page: dist-single/stealth-sprinter.html (three.js 0.170.0 from jsDelivr)
@@ -35,7 +35,7 @@ npm run build:single  # one-file page: dist-single/stealth-sprinter.html (three.
 | **Water** | Tank levels, run taps and showers, refill, dump, empty the toilet, simulate a leak (pump lock-out), winterise; freeze-protection status. |
 | **Resources** | Multi-day simulation with battery, temperature, water and air-quality charts, energy by use, and endurance until the first resource runs out. |
 | **Engineering** | Live acceptance tests plus weight & axle loads, capacities, heating/cooling demand, space use, cost estimate, items needing licensed sign-off and labelled assumptions. |
-| **Drive** (top bar) | Everything stows first (travel interlock), then drive anywhere in an endless, generated landscape: a winding track, forests, lakes (ice in winter), rocks and mesas. The van's real mass, power, drag and per-surface grip set acceleration, top speed, braking, understeer, slides and wheelspin on slopes; the body pitches and rolls on the terrain. Chase, cockpit, orbit and cinematic cameras; minimap; headlights and brake lights; synthesised engine sound. The engine charges the house battery through the DC-DC chargers and burns fuel at the live speed. Park anywhere and the slope is reported. Keyboard (W A S D, Space, C, L) or on-screen wheel and pedals. |
+| **Drive** (top bar) | Everything stows first (travel interlock), then drive an endless, generated Montana-flavoured world — see [Explore the world](#explore-the-world). |
 | **Guided tour** (top bar) | Twelve scripted stops — stealth exterior, roof, service garage, live power, galley, wet bath, sealed ventilation, infrared, slide-out pod, full camp, daily living and honest limits. Play, pause or step. |
 | **Walk inside** | First-person at eye height: drag to look, W A S D / arrows / on-screen pad to walk. Collisions come from the component catalogue, so the walk respects the real aisle. Click anything to inspect it. |
 | **Infrared camera** | Every surface shaded by its estimated temperature (ironbow palette, auto-ranged scale): sol-air heating, night-sky cooling, U-value losses, stratified cabin air and live appliance heat. Hover for °C. |
@@ -52,13 +52,65 @@ npm run build:single  # one-file page: dist-single/stealth-sprinter.html (three.
   the same signed-distance functions.
 - LT245/75R16 all-terrain tyres (instanced tread blocks, sidewall lettering) on 16" six-spoke
   alloys with brake discs and calipers.
-- Endless world: the van stays at the scene origin and the terrain is streamed in 48 m chunks
-  around it (floating origin), so every view mode, the walk-through and infrared work
-  anywhere. Each scenario sets the relief, track surface, water or ice, forests, grass that
-  sways in the wind, shrubs, rocks and a horizon of hills or desert mesas; a warm camp light
-  hangs under the awning after dark.
+- Endless world: the van stays at the scene origin and the land is streamed around it
+  (floating origin), so every view mode, the walk-through and infrared work anywhere. Terrain
+  is streamed as 48 m near chunks plus a 384 m far ring, roads and towns as 96 m tiles, and the
+  **land itself never changes between seasons or scenarios** — spring, summer, autumn and winter
+  are one shared "skin" of shader uniforms (snow line, wetness, ice, grass/forest/crop tint,
+  leaf amount) applied to the same terrain, roads, lakes, trees and town surfaces.
+- A warm camp light hangs under the awning after dark; town windows, signs, street lamps and
+  traffic headlights light up at night.
 - CC0 photographic PBR textures (wood, leather, fabric, ground) on metric UVs; glowing
   shader streams show water, current and airflow moving at their simulated rates.
+
+## Explore the world
+
+The drive world is generated from a seed, deterministic and infinite. Real Montana names are used
+as flavour; it is not a map. Everything is pure JavaScript you can test (`src/world/`).
+
+- **Settlements** on a jittered 2.2 km grid: cities, towns, villages, farms and ranches, lodges,
+  truck stops, campgrounds and junctions. Each flattens its own plateau and lays out a street grid
+  (main street east–west, a main avenue north–south) with zoned blocks — towers and offices in a
+  city core, shops on main street, houses, parks, church, school, courthouse, hospital, industrial
+  yards with silos, a water tower, grain elevators and RV parks. Windows, storefronts, brick,
+  corrugated metal, awnings and business signs are drawn by a shader; parked cars and street trees
+  fill the blocks.
+- **Roads**: interstates, highways, county roads, gravel and two-track, routed by A* through the
+  valleys (lakes and other towns blocked), then relaxed into wide, drivable curves (5th-percentile
+  radius > 200 m on highways), graded under per-class limits and blended into the town plateaus.
+  Roadside power lines, ranch fences, mile markers, "next town" and speed-limit signs and
+  billboards follow every road; roadside **discoveries** (overlooks, hot springs, a giant cowboy
+  boot, bison and prairie-dog statues, ghost-mine headframes, old barns, giant trees) wait off
+  the shoulder.
+- **Lakes** freeze in winter; shallow water can be forded, deep water stops the van.
+- **Traffic and wildlife**: cars, pickups, motorhomes and semis follow the roads with headlights at
+  night; deer, cattle and bison wander, flee from the van, and deer sometimes cross ahead.
+- **Services** (stop at a pump, tap, dump station, campground or shop): buy diesel, fill fresh water,
+  dump the tanks, check in for shore power, restock. Purchases change the live simulation state;
+  distance in the drive world is compressed, so drive fuel burns 14× faster than the real distance
+  and refuelling matters. Cash is saved in the browser.
+- **Map and GPS**: tap the minimap for a full-screen pannable map. Tap a town to navigate (A* over
+  the settlement graph, turn-by-turn with distance and ETA, automatic re-route) or tap the ground
+  for a waypoint arrow. "Nearest fuel / water" shortcuts.
+- **Passport**: stamps for every settlement, roadside discoveries, 17 achievements with cash
+  rewards and a trip log — all saved in the browser.
+
+### Driving controls
+
+| Input | Action |
+|---|---|
+| **W / ↑**, **S / ↓** | Go, brake (hold at a stop to back up) |
+| **A D / ← →** | Steer — smoothed so taps are gentle |
+| **Space** · **R** · **V**, **+ −** · **B** · **T** · **Q** | Handbrake · Drive/Reverse · cruise control · speed limiter (posted limits) · back on the nearest road · horn |
+| **C** · **L** · **M** · **E** | Camera (chase, cockpit, orbit, cinematic) · lights · map · use the service you are stopped at |
+| Touch | Drag anywhere on the left half to steer, hold Go or Brake; optional tilt steering |
+| Gamepad | Stick steers, triggers go/brake, A handbrake, B drive/reverse, Y camera, X lights, bumpers cruise/limiter, Start back on road |
+
+The ⚙ panel has **Easy / Standard / Pro** driving aids (Easy adds lane keeping with curve preview,
+traction and stability control, soft pedals and eases off before curves that are too tight),
+steering sensitivity, camera shake, mph or km/h, engine volume, vibration, graphics tier and a
+**scenery season** selector (Auto follows the scenario). Dust, snow powder, flung mud, spray and
+tyre smoke come off the wheels; skid marks and ruts are left on the ground.
 
 ## Design at a glance
 
@@ -95,9 +147,13 @@ Latest acceptance results: [docs/ACCEPTANCE-REPORT.md](docs/ACCEPTANCE-REPORT.md
 ```
 src/data/      vehicle specs, component catalogue, wiring, plumbing, HVAC, mechanisms, scenarios
 src/sim/       thermal, coupled time-step model, weight, cost, space, acceptance suite
+src/world/     seeded world generator (terrain, lakes, settlements, A* roads), town layouts,
+               GPS routing, discoveries, names — pure JS, unit tested
 src/scene/     three.js stage, lofted body, interior builders, services & streams, infrared,
-               walk-through, props, overlays, modes
-src/ui/        app controller, dashboards, charts, guided tour
+               walk-through, props, overlays, modes; land, towns, buildings, roadside, effects,
+               life (traffic and wildlife), drive model
+src/ui/        app controller, dashboards, charts, guided tour; drive HUD, map and GPS,
+               services and wallet, passport
 tests/         node --test acceptance tests
 scripts/       report generator, single-file build
 ```

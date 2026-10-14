@@ -809,12 +809,46 @@ function camp(L, world, n) {
   L.zone('dump', cx - 8, cz + 6, 8, { name: 'Dump station' });
 }
 
+/**
+ * The pavement of a plain junction node: one street per road that really arrives (`arms` is
+ * World.armsOf(n)), in that road's own class and drawn width, from JUNCTION_PORT (where the road ribbon
+ * ends) in to the far kerb of the paved road that crosses it. Reaching the far kerb means a side with no
+ * road never ends in a dead-end stub, and every pair of paved streets crosses so the intersection patch
+ * fills the middle. Biggest road first, so a point shared by several streets takes the major road's class.
+ * Each entry carries `x0..z1`, the rectangle it covers. Cached on the node.
+ */
+export const JUNCTION_PORT = 14;
+const PAVED = new Set(['interstate', 'highway', 'county']);
+export function junctionStreets(n, arms) {
+  if (n._jstreets) return n._jstreets;
+  const out = [];
+  const crossHalf = (a, b) => Math.max(PAVED.has(a?.cls) ? a.w : 0, PAVED.has(b?.cls) ? b.w : 0) / 2;
+  for (const [side, ox, oz] of [['E', 1, 0], ['W', -1, 0], ['N', 0, -1], ['S', 0, 1]]) {
+    const a = arms[side];
+    if (!a) continue;
+    const c = ox ? crossHalf(arms.N, arms.S) : crossHalf(arms.E, arms.W);
+    const ax = n.x - ox * c, az = n.z - oz * c, bx = n.x + ox * JUNCTION_PORT, bz = n.z + oz * JUNCTION_PORT;
+    const h = a.w / 2;
+    out.push({ ax, az, bx, bz, w: a.w, kind: a.cls, rank: a.rank, x0: Math.min(ax, bx) - (oz ? h : 0), x1: Math.max(ax, bx) + (oz ? h : 0), z0: Math.min(az, bz) - (ox ? h : 0), z1: Math.max(az, bz) + (ox ? h : 0) });
+  }
+  out.sort((p, q) => p.rank - q.rank);
+  n._jstreets = out;
+  return out;
+}
+
 function junction(L, world, n) {
   const { x: cx, z: cz } = n;
-  L.street(cx - 14, cz, cx + 14, cz, 9, 'minor', '');
-  L.street(cx, cz - 14, cx, cz + 14, 9, 'minor', '');
-  L.furn('stop', cx + 7.4, cz + 6.4, -Math.PI / 2, 0, 0, 0, 2);
-  L.furn('stop', cx - 7.4, cz - 6.4, Math.PI / 2, 0, 0, 0, 2);
+  const arms = world.armsOf(n);
+  const ew = Math.max(arms.E?.w ?? 0, arms.W?.w ?? 0), ns = Math.max(arms.N?.w ?? 0, arms.S?.w ?? 0);
+  for (const s of junctionStreets(n, arms)) L.street(s.ax, s.az, s.bx, s.bz, s.w, s.kind, '');
+  // a stop sign on the right of every road that has to give way to a bigger (or equal) crossing road
+  for (const [side, ox, oz] of [['E', 1, 0], ['W', -1, 0], ['N', 0, -1], ['S', 0, 1]]) {
+    const a = arms[side];
+    const cross = ox ? ns : ew, crossRank = Math.min(...(ox ? [arms.N, arms.S] : [arms.E, arms.W]).map((q) => q?.rank ?? 99));
+    if (!a || !cross || a.rank < crossRank) continue;
+    const back = cross / 2 + 3.5, right = a.w / 2 + 1.6;
+    L.furn('stop', cx + ox * back + oz * right, cz + oz * back - ox * right, faceRot(ox, oz), 0, 0, 0, 2);
+  }
   if (hash2(n.i, n.j, 96) < 0.3) {
     L.lot('shed', cx + 24, cz - 18, 9, 6, { floors: 1, fh: 3, pal: 7, roof: 'gable', sign: pick(L.rng, BUSINESSES) });
     L.tree(cx - 24, cz + 20, 1, 0);

@@ -238,12 +238,17 @@ class Ground {
   }
 }
 
+// Streets whose kind is a road class (junction arms) are drawn with that class's markings; gravel and
+// dirt, like railways, are laid whole instead of being cut at crossings.
+const unpaved = (s) => s.kind === 'gravel' || s.kind === 'dirt';
+const streetCls = (s) => (s.kind === 'main' || s.kind === 'minor' ? RC.street : RC[s.kind] ?? RC.street);
+
 /** Street pieces between crossings + intersection patches, computed once per layout. */
 export function streetPlan(L) {
   if (L._plan) return L._plan;
   const axis = (s) => (Math.abs(s.az - s.bz) < 1e-6 ? 'h' : Math.abs(s.ax - s.bx) < 1e-6 ? 'v' : null);
   const plan = { pieces: [], patches: [] };
-  const hs = L.streets.filter((s) => axis(s) === 'h' && s.kind !== 'gravel'), vs = L.streets.filter((s) => axis(s) === 'v' && s.kind !== 'gravel');
+  const hs = L.streets.filter((s) => axis(s) === 'h' && !unpaved(s)), vs = L.streets.filter((s) => axis(s) === 'v' && !unpaved(s));
   const cut = (s, others, horiz) => {
     const lo = horiz ? Math.min(s.ax, s.bx) : Math.min(s.az, s.bz), hi = horiz ? Math.max(s.ax, s.bx) : Math.max(s.az, s.bz);
     const c = horiz ? s.az : s.ax;
@@ -270,7 +275,7 @@ export function streetPlan(L) {
       }
     }
   }
-  for (const s of L.streets) if (!axis(s) || s.kind === 'gravel') plan.pieces.push({ s, a: 0, b: Math.hypot(s.bx - s.ax, s.bz - s.az), horiz: null });
+  for (const s of L.streets) if (!axis(s) || unpaved(s)) plan.pieces.push({ s, a: 0, b: Math.hypot(s.bx - s.ax, s.bz - s.az), horiz: null });
   L._plan = plan;
   return plan;
 }
@@ -449,8 +454,8 @@ export class Towns {
     const inter = (v, lo, hi) => v >= lo && v < hi;
     for (const pc of plan.pieces) {
       const s = pc.s;
-      const cls = s.kind === 'gravel' ? RC.gravel : RC.street;
-      const dy = s.kind === 'main' ? 0.075 : s.kind === 'minor' ? 0.06 : 0.05;
+      const cls = streetCls(s);
+      const dy = unpaved(s) ? 0.05 : s.kind === 'minor' ? 0.06 : 0.075;
       if (pc.horiz === true) {
         const a = Math.max(pc.a, ox), b = Math.min(pc.b, ox + TILE);
         if (b > a && inter(pc.c, oz, oz + TILE)) gr.strip(a, pc.c, b, pc.c, s.w, cls, dy, a - Math.min(s.ax, s.bx));

@@ -11,7 +11,7 @@
 import { hash2, fbm, ridged, clamp, lerp, smoothstep, prng } from './noise.js';
 import { CITY_NAMES, TOWN_NAMES, makeName } from './names.js';
 import { SHOULDER, planHighway, lotArrays, lotAt, scanBridges } from './highway.js';
-import { trafficSignalPhase } from './layout.js';
+import { trafficSignalPhase, junctionStreets } from './layout.js';
 
 export const S = 2200; // node spacing (m)
 const LS = 3600; // lake cell (m)
@@ -348,6 +348,21 @@ export class World {
     };
     this.nodes.set(key, n);
     return n;
+  }
+
+  /**
+   * The roads that really reach a node: { E, W, N, S }, each null or { cls, w, rank } with `w` the full
+   * paved width (lanes plus shoulders, as drawn) and `rank` the road class id (smaller = bigger road).
+   */
+  armsOf(n) {
+    if (n._arms) return n._arms;
+    const arm = (i, j, dir) => {
+      if (!this.edgeExists(i, j, dir)) return null;
+      const cls = this.edgeClass(i, j, dir);
+      return { cls, w: ROAD[cls].width + 2 * (SHOULDER[cls] || 0), rank: ROAD[cls].id };
+    };
+    n._arms = { E: arm(n.i, n.j, 0), W: arm(n.i - 1, n.j, 0), N: arm(n.i, n.j - 1, 1), S: arm(n.i, n.j, 1) };
+    return n._arms;
   }
 
   /** Nodes whose footprint (plus margin) contains the point. */
@@ -809,6 +824,12 @@ export class World {
     }
     const n = this.settlementAt(x, z, 0);
     if (n) {
+      // a junction is paved with the class of the road that runs through it, so grip and the posted limit carry on
+      if (n.kind === 'junction') {
+        const s = junctionStreets(n, this.armsOf(n)).find((q) => x >= q.x0 && x <= q.x1 && z >= q.z0 && z <= q.z1);
+        if (s) return { kind: 'road', cls: s.kind, lot: null, depth: 0, h, base, road: null, bridge: false, bridgeInfo: null };
+        return { kind: 'ground', depth: 0, h, base };
+      }
       const st = this.streetAt(n, x, z);
       if (st) return { kind: 'street', cls: st, depth: 0, h, base };
     }

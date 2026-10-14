@@ -148,7 +148,8 @@ test('layouts: every settlement lays out, footprints stay on the plateau and do 
     for (let j = -8; j <= 8; j++) {
       const n = W.node(i, j);
       const L = layoutOf(W, n);
-      assert.ok(L && L.lots && L.streets.length > 0, `${n.kind} has streets`);
+      const roadless = n.kind === 'junction' && !Object.values(W.armsOf(n)).some(Boolean); // nothing leads here, so nothing is paved
+      assert.ok(L && L.lots && (L.streets.length > 0 || roadless), `${n.kind} has streets`);
       if (n.kind === 'city') cities++;
       const solid = L.lots.filter((l) => l.solid && !['field', 'rv', 'tree'].includes(l.k));
       for (const l of L.lots) {

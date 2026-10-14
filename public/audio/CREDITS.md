@@ -9,4 +9,4 @@ All samples are CC0 / public domain, transcoded to mono Ogg Vorbis (32 kHz).
 - OpenGameArt "amb_outside_1", "amb_rain_loop_1", "amb_morning_sounds_perfect_loop", CC0: wind, rain, morning.
 - OpenGameArt "Car blinker SFX", CC0: blinker.
 
-Engines, air horn, air-brake hiss, tyre and wind noise are synthesised in src/scene/audio.js.
+Engines (a muffled harmonic firing note behind low-pass and cabin filters), air horn, air-brake hiss, tyre and wind noise are synthesised in src/scene/audio.js.

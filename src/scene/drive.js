@@ -10,7 +10,7 @@ import { weightReport } from '../sim/weight.js';
 import { SURFACES } from './land.js';
 import { Rig, SPEC } from '../sim/truck.js';
 import { VAN_ENGINE, vanDriveForce, vanGearIndex, vanRpm } from '../sim/powertrain.js';
-import { BodyDamage, chainContact, circleRectContact, damageAmount, impactZone, inertia, makeBody, resolveImpact, rolloverSpeed, staticBody, stepCrashMotion } from '../sim/crash.js';
+import { BodyDamage, circleRectContact, damageAmount, impactZone, inertia, makeBody, resolveImpact, rolloverSpeed, staticBody, stepCrashMotion } from '../sim/crash.js';
 import { TruckRig } from './truck.js';
 
 const L = 4.325; // wheelbase
@@ -23,6 +23,7 @@ const DELTA_MAX = 0.5; // rad road-wheel angle (≈ 15.6 m turning circle)
 const V_MAX = 38; // m/s governed (≈ 137 km/h)
 const COM_X = 1.9; // centre of mass ahead of the rear axle (≈ 56 % of the weight on the front axle)
 const BODY_LEN = 5.9, BODY_WID = 2.0;
+const VAN_ROWS = [-1.4, -0.1, 1.2, 2.5, 3.8, 4.7]; // footprint rows along the van, from the rear axle
 const STATIC = staticBody();
 // how hard each kind of obstacle is: restitution, scuff friction and the share of the crash energy the van keeps
 const HARD = {
@@ -180,6 +181,8 @@ export class Driver {
   exit() {
     this.active = false;
     this.v = 0;
+    this.vy = this.wc = 0;
+    this.rolledVan = false; // parked: the van is stood back up (its damage stays until it is repaired)
     this.keys.clear();
     this.cruise.on = false;
     this.pad.throttle = this.pad.brake = this.pad.steer = this.pad.hand = 0;
@@ -782,7 +785,7 @@ export class Driver {
     this.surface = sf;
     const { mu } = this.surface;
     const crr = this.surface.crr + this.dmg.crrExtra;
-    if (this.rolledVan) inp = { throttle: 0, brake: 0.5, steer: 0 };
+    if (this.rolledVan) inp = { throttle: 0, brake: 1, steer: 0 }; // on its side it ploughs to a stop
     // after an impact: the body turns under its momentum (sideslip), the tyres pull the slide out
     this.crashSlip = 0;
     if (this.vy !== 0 || this.wc !== 0) {
@@ -904,7 +907,12 @@ export class Driver {
   /** Footprint circles { x, z, r } in world coordinates: four along the van, or tractor plus trailer. */
   bodyPoints() {
     const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
-    if (this.vehicle !== 'semi') return [-1.2, 0.6, 2.4, 4.3].map((lx) => ({ x: this.x + lx * c, z: this.z - lx * s, r: 1.02 }));
+    if (this.vehicle !== 'semi') {
+      // a rounded box: two columns of circles, so a hit on one side of the nose twists the van instead of sliding off a round nose
+      const pts = [];
+      for (const lx of VAN_ROWS) for (const ly of [-0.43, 0.43]) pts.push({ x: this.x + lx * c + ly * s, z: this.z - lx * s + ly * c, r: 0.62 });
+      return pts;
+    }
     const pts = [-1.2, 1.2, 3.4, 5.4, 7.0].map((lx) => ({ x: this.x + lx * c, z: this.z - lx * s, r: 1.3 }));
     if (this.rig.trailer !== 'none') {
       const g = this.rig.geometry(this.x, this.z);

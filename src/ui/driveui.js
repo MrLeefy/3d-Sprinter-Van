@@ -156,7 +156,7 @@ export class DriveUI {
         <tr><td><kbd>W</kbd> <kbd>↑</kbd></td><td>Go</td></tr><tr><td><kbd>S</kbd> <kbd>↓</kbd></td><td>Brake · hold at a stop to back up</td></tr>
         <tr><td><kbd>A</kbd> <kbd>D</kbd> <kbd>←</kbd> <kbd>→</kbd></td><td>Steer</td></tr><tr><td><kbd>Space</kbd></td><td>Handbrake</td></tr>
         <tr><td><kbd>R</kbd></td><td>Drive / Reverse (at a standstill)</td></tr><tr><td><kbd>V</kbd></td><td>Cruise control · <kbd>+</kbd> <kbd>−</kbd> to adjust</td></tr>
-        <tr><td><kbd>B</kbd></td><td>Speed limiter (holds the posted limit)</td></tr><tr><td><kbd>T</kbd></td><td>Back on the nearest road</td></tr>
+        <tr><td><kbd>B</kbd></td><td>Speed limiter (holds the posted limit)</td></tr><tr><td><kbd>T</kbd></td><td>Back on the nearest road (a tow, with repairs, if the van is rolled or its engine is dead)</td></tr>
         <tr><td><kbd>Q</kbd></td><td>Horn (air horn in the semi)</td></tr>
         <tr><td><kbd>P</kbd> <kbd>K</kbd></td><td>Semi: parking brake · engine brake (use it on long downhills)</td></tr>
         <tr><td><kbd>G</kbd> <kbd>X</kbd> <kbd>Z</kbd></td><td>Semi: auto / manual gearbox · shift up · shift down</td></tr><tr><td><kbd>C</kbd> <kbd>L</kbd> <kbd>M</kbd></td><td>Camera · lights · map</td></tr>

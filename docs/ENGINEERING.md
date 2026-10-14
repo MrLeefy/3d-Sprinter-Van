@@ -284,9 +284,31 @@ temperatures. It is an estimate for explanation, not a measured image:
   speed-sensitive steering and partial traction control; *Pro* is the raw model.
   Cruise control is a PI loop with light braking on long descents; the limiter holds the
   posted limit (interstate 80 mph, highway 65, county 55, gravel 35, track 20, streets 25).
-- **Collisions** use four circles along the van's centre line against axis-aligned building
-  footprints, tree and boulder circles, roadside poles and props, traffic (circle chains) and
-  animals. Surfaces add shake: 0.75 m corrugations on gravel, ruts on tracks, tussocks on grass.
+- **Powertrain** (`src/sim/powertrain.js`): a drive-mode tune of 225 kW at the wheels (the stock
+  2.0 L makes about 125 kW there) and 15.5 kN of traction-limited force in first gear: constant
+  force up to 52 km/h, constant power beyond. The 9-speed automatic cuts the torque to 30 % for
+  0.28 s on each upshift. Flat-road full-throttle: 0–50 km/h in 4.0 s, 0–100 in 9.8 s, governed
+  137 km/h after about 18 s (the stock engine needed 16.3 s to 100 km/h).
+- **Collisions** (`src/sim/crash.js`): the van is a rounded box of twelve circles (six rows, two
+  columns) against axis-aligned building footprints, tree and boulder circles, roadside poles and
+  props, traffic footprints and animals. Each contact is an impulse
+  j = −(1 + e)·vₙ / (1/mₐ + 1/m_b + (rₐ×n)²/Iₐ + (r_b×n)²/I_b) at the contact point, followed by Coulomb
+  friction along the surface, so an off-centre hit also gives yaw. The model tracks the rear axle
+  but resolves impacts about the centre of mass (1.9 m ahead). After an impact the body turns under
+  its momentum (sideslip vy and extra yaw rate), and the tyres pull the slide out at 0.9·μ·g.
+  Absorbed energy ½(1 − e²)vₙ²/(…) becomes zone damage (520 kJ wrecks a zone; a 50 km/h wall hit is
+  ≈ 360 kJ). Front damage ≥ 0.25 starts to cost power (up to −65 %), ≥ 0.97 stops the engine;
+  front-corner hits bend the steering (up to 0.07 rad of pull); side damage adds rolling resistance;
+  repair cost is $1,100 / $650 / $800 / $800 per full front / rear / left / right zone. A van tips
+  over when its sideways speed exceeds √(2·g·(√((t/2)² + h²) − h)/0.33) scaled for the ground
+  (about 4 m/s on grass, 6 m/s on tarmac, never on ice). Surfaces add shake: 0.75 m corrugations on
+  gravel, ruts on tracks, tussocks on grass.
+- **Traffic collisions**: AI vehicles on their lane follow the road polyline; one that is hit
+  with a closing speed over 4.5 m/s, a sideways shove over 2.4 m/s, or a spin over 0.45 rad/s
+  (or that is badly damaged) becomes a free body that slides under anisotropic tyre friction (grip
+  across, 4 m/s² drag along) to a stop. Two path followers never collide with each other (the driving logic
+  keeps them apart; overlaps are counted as *ghosts* in `Traffic.stats`). Wrecks publish their place
+  on the road (`obs`) so the others brake, pass or queue; they are removed 75 s later when out of view.
 
 ### World generation (drive demonstration)
 
@@ -307,7 +329,7 @@ roadside discoveries per road edge by hashing the edge id.
 
 ## 11. Acceptance tests
 
-`npm test` runs 106 node tests (the acceptance suite plus world generation, town layout, routing and discovery tests). Of the 76 engineering checks, 73 pass, 3 warn and 0 fail. They
+`npm test` runs 207 node tests (the acceptance suite plus world generation, town layout, routing, discovery, drive/crash physics and traffic tests). Of the 76 engineering checks, 73 pass, 3 warn and 0 fail. They
 cover component data, geometry (clashes, envelope, arches, service clearances, aisles, egress,
 ground clearance), moving assemblies and expansion clearances, weight and axle loads, electrical
 protection, voltage drop, peak current, inverter loading and PV limits, heating/cooling

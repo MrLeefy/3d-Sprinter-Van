@@ -128,6 +128,7 @@ export class Traffic {
     this.conns = new Map(); // junction connectors by node and sides
     this.conflicts = new Map();
     this.resv = new Set(); // vehicles holding a place in a junction
+    this.pruneT = 20;
   }
 
   setQuality(tier) {
@@ -138,6 +139,7 @@ export class Traffic {
 
   clear() {
     this.vehicles.length = 0;
+    this.resv.clear();
     this.populated = false;
     for (const m of this.meshes.values()) {
       m.mesh.count = 0;
@@ -469,7 +471,9 @@ export class Traffic {
     }
     this.scan(v, latT - hw, latT + hw, t, multi ? 220 : 900);
     const v0 = Math.min(v.vmax, v.curveLim);
-    const lookStraight = (dist) => S.straightFor(curvOf(e), stepOf(e), v.s, v.dir, dist, 1 / 450) && v.townD > dist;
+    // someone who has sat behind a stopped vehicle for a while accepts a bend as long as the way round is short and clear
+    const stuck = own.same.ref && own.same.v < 1 && v.followTime > 5;
+    const lookStraight = (dist) => S.straightFor(curvOf(e), stepOf(e), v.s, v.dir, dist, stuck ? 1 / 170 : 1 / 450) && v.townD > dist;
     const c = {
       multi, inner, passing: v.passing, heavy: K.cls === 'heavy', v: v.v, v0, pSelf: v.p, len: K.len, abort: v.abort,
       lead: own.same.ref && own.same.gap < BIG ? { gap: own.same.gap, v: own.same.v, len: own.same.len } : null,
@@ -514,6 +518,20 @@ export class Traffic {
       case 'S': return { e: E.get(`${node.i},${node.j},1`), start: true };
       default: return { e: E.get(`${node.i},${node.j - 1},1`), start: false };
     }
+  }
+
+  /** Drivers slow down for a crash scene beside or on the road ahead (and rubberneck while passing it). */
+  wreckLimit(v) {
+    let lim = Infinity;
+    for (const w of this.vehicles) {
+      const o = w.free && w.obs;
+      if (!o || o.e !== v.e) continue;
+      const f = (o.s - v.s) * v.dir;
+      if (f < -25 || f > 170) continue;
+      if (Math.abs(o.lat * o.dir * v.dir - v.lat) > 9) continue;
+      lim = Math.min(lim, f > 0 ? S.approachLimit(9, f - 20, 1.7) : 9);
+    }
+    return lim;
   }
 
   /** Metres until the hand-over to the next road (a connector takes over a little before the port). */
@@ -766,7 +784,7 @@ export class Traffic {
       endLim = Math.min(endLim, j.cap);
       hold = j.hold;
     }
-    let v0 = Math.min(v.vmax * (v.push && v.opp ? 1.15 : 1), v.curveLim, v.townLim, endLim);
+    let v0 = Math.min(v.vmax * (v.push && v.opp ? 1.15 : 1), v.curveLim, v.townLim, endLim, this.wreckLimit(v));
     // perceive
     const hw = K.w / 2 + 0.1;
     const own = this.scan(v, v.lat - hw, v.lat + hw, v.ownScan || (v.ownScan = makeScan()), 420, true);
@@ -1236,6 +1254,19 @@ export class Traffic {
       if (gone || (this.vehicles.length > this.max + 2 && dist > 250 && !this.inView(v.x, v.z, 30, v.y))) this.vehicles.splice(i, 1);
     }
     for (const v of this.resv) if (!v.res || v.free || !this.vehicles.includes(v)) this.resv.delete(v);
+    this.pruneT -= dt;
+    if (this.pruneT <= 0) {
+      this.pruneT = 20;
+      // connectors of settlements the player has left far behind (rebuilt on demand)
+      let dropped = false;
+      for (const [k, c] of this.conns) {
+        if (Math.hypot(c.node.x - D.x, c.node.z - D.z) < 4500) continue;
+        if (this.vehicles.some((v) => v.e === c || v.res === c || (v.next && v.next.e === c))) continue;
+        this.conns.delete(k);
+        dropped = true;
+      }
+      if (dropped) this.conflicts.clear();
+    }
     this.collidePairs();
     for (const v of this.vehicles) this.collidePlayer(v, D, dt);
     this.paint(D);

@@ -14,7 +14,7 @@ simulation models heat, humidity, CO₂, battery, water and diesel use. An accep
 ```bash
 npm install
 npm run dev           # interactive viewer at http://localhost:5173
-npm test              # 106 node tests: engineering acceptance + world, towns, routing (node --test)
+npm test              # 207 node tests: engineering acceptance, world, towns, routing, drive and crash physics, traffic (node --test)
 npm run report        # regenerate docs/ACCEPTANCE-REPORT.md
 npm run build         # static site in dist/
 npm run build:single  # one-file page: dist-single/stealth-sprinter.html (three.js 0.170.0 from jsDelivr)
@@ -83,8 +83,14 @@ as flavour; it is not a map. Everything is pure JavaScript you can test (`src/wo
   boot, bison and prairie-dog statues, ghost-mine headframes, old barns, giant trees) wait off
   the shoulder.
 - **Lakes** freeze in winter; shallow water can be forded, deep water stops the van.
-- **Traffic and wildlife**: cars, pickups, motorhomes and semis follow the roads with headlights at
-  night; deer, cattle and bison wander, flee from the van, and deer sometimes cross ahead.
+- **Traffic and wildlife**: cars, pickups, motorhomes, coaches and semis follow the roads with
+  headlights at night, keep a safe gap, pass slower traffic and honk at a stopped or tailgating van.
+  They no longer stop dead at the end of a road: they drive on **through towns and junctions**,
+  turning at the main street and avenue, giving way by road class and arrival order, keeping
+  their lane through the crossing and queuing at the stop line. Crash into one and it leaves the
+  road as a **wreck** with its hazards on (smoking if badly hurt); the others see it, slow down,
+  pass it or queue behind it, and it is towed away once nobody is looking. Deer, cattle and bison
+  wander, flee from the van, and deer sometimes cross ahead.
 - **Services** (stop at a pump, tap, dump station, campground or shop): buy diesel, fill fresh water,
   dump the tanks, check in for shore power, restock. Purchases change the live simulation state;
   distance in the drive world is compressed, so drive fuel burns 14× faster than the real distance
@@ -111,6 +117,28 @@ traction and stability control, soft pedals and eases off before curves that are
 steering sensitivity, camera shake, mph or km/h, engine volume, vibration, graphics tier and a
 **scenery season** selector (Auto follows the scenario). Dust, snow powder, flung mud, spray and
 tyre smoke come off the wheels; skid marks and ruts are left on the ground.
+
+### Power and sound
+
+The van has a performance-tuned turbo-diesel (≈ 225 kW at the wheels in drive mode) and a
+9-speed automatic that cuts torque for a moment on each upshift: 0–100 km/h in about 10 s
+(16 s before), 137 km/h governed. The engine sound is a soft, muffled diesel note — a rounded
+harmonic firing pulse behind low-pass filters and a cabin filter that closes further in the
+cockpit view, with a faint intake whoosh and a damped clatter — instead of the old buzzy
+saw-and-square synth.
+
+### Crashes
+
+Impacts are solved as 2-D rigid-body collisions (restitution, scuff friction, yaw spin), so *where*
+and *how fast* you hit decides what happens: a head-on hit stops the van, a hit on one corner
+swings the nose round into a spin-out, a glancing blow scrapes speed off along a wall, and
+sliding sideways on soft ground can trip the van onto its side. Damage builds by zone (front,
+rear, left, right) on the new **Damage** meter: a crushed front costs power, pulls the steering
+and finally stops the engine (steam, then black smoke, from the hood); side damage adds rolling
+resistance. Hits throw sparks, glass and debris and shake the camera. Easy mode forgives, Pro does not.
+Press **T** after a rollover or a dead engine for a tow (stands the van up, repairs it, costs
+cash); a **Repair** button at fuel stations fixes lesser damage. Other cars are knocked about by
+their mass: a sedan is thrown, a loaded semi barely moves.
 
 ## Design at a glance
 
@@ -146,7 +174,8 @@ Latest acceptance results: [docs/ACCEPTANCE-REPORT.md](docs/ACCEPTANCE-REPORT.md
 
 ```
 src/data/      vehicle specs, component catalogue, wiring, plumbing, HVAC, mechanisms, scenarios
-src/sim/       thermal, coupled time-step model, weight, cost, space, acceptance suite
+src/sim/       thermal, coupled time-step model, weight, cost, space, acceptance suite; van
+               powertrain, crash physics (rigid-body impacts, damage), traffic AI and junction logic
 src/world/     seeded world generator (terrain, lakes, settlements, A* roads), town layouts,
                GPS routing, discoveries, names — pure JS, unit tested
 src/scene/     three.js stage, lofted body, interior builders, services & streams, infrared,

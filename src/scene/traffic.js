@@ -111,6 +111,7 @@ export class Traffic {
     this.sphere = new THREE.Sphere();
     this.pc = []; // the player's footprint circles this frame
     this.tgt = makeScan();
+    this.tgt2 = makeScan();
     this.fp = [];
     this.stats = { vehicles: 0, drawn: 0, hi: 0, lo: 0, honks: 0, passes: 0, crashes: 0 };
     this.enabled = true;
@@ -456,7 +457,13 @@ export class Traffic {
     // perceive
     const hw = K.w / 2 + 0.1;
     const own = this.scan(v, v.lat - hw, v.lat + hw, v.ownScan || (v.ownScan = makeScan()), 420);
-    const lead = own.lead;
+    let lead = own.lead;
+    if (v.mode === 'signal' || v.mode === 'change') {
+      // while moving over, watch the leader in the lane we are heading for as well
+      const lt = v.mode === 'signal' ? v.pendingLat : v.latTo;
+      const t2 = this.scan(v, lt - hw, lt + hw, this.tgt2, 420);
+      if (t2.lead.gap < lead.gap) lead = t2.lead;
+    }
     if (v.abort && v.passLead && v.passLead !== PLAYER && v.passLead.v !== undefined) v0 = Math.min(v0, Math.max(0, v.passLead.v - 3));
     else if (v.abort && v.passLead === PLAYER) v0 = Math.min(v0, Math.max(0, own.same.v - 3));
     let acc = S.idmAccel(v.p, v.v, lead.gap, lead.v, v0);

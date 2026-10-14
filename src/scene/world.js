@@ -224,6 +224,32 @@ export class World {
     }
     this.terrain.tick(dt);
     this.driver.update(dt);
+    if (this.body.parts.updateDash) {
+      this.dashT = (this.dashT || 0) - dt;
+      if (this.dashT <= 0) {
+        this.dashT = 0.15;
+        const D = this.driver;
+        const g = !D.active ? 'P' : D.gear() === 'D' ? `D${(D.vanGear || 0) + 1}` : D.gear();
+        let warn = '';
+        if (D.rolledVan) warn = 'ROLLED OVER — PRESS T';
+        else if (D.dmg?.engineDead) warn = 'ENGINE OUT — PRESS T';
+        else if ((D.vd?.lam > 0.9 || D.vd?.tip > 0.015) && Math.abs(D.v) > 6) warn = 'TIPPING — SLOW DOWN';
+        else if (D.dmg?.zone?.front > 0.45) warn = 'RADIATOR DAMAGED';
+        this.body.parts.updateDash({
+          kmh: D.active ? Math.abs(D.v) * 3.6 : 0,
+          rpm: D.active ? D.rpm(D.lastInput?.throttle || 0) : 0,
+          gear: g,
+          fuelPct: snap ? Math.min(1, Math.max(0, (snap.fuelL ?? 75) / 90.8)) : 0.85,
+          soc: snap?.soc ?? 0.95,
+          altW: snap?.altW ?? 0,
+          solarW: snap?.solarW ?? 0,
+          tin: snap?.Tin ?? 20,
+          limit: D.active ? D.limitKmh : null,
+          units: D.cfg?.units || 'mph',
+          warn,
+        });
+      }
+    }
     this.fx.update(dt, this.driver);
     this.traffic.update(dt, this.driver);
     this.wildlife.update(dt, this.driver);

@@ -130,17 +130,150 @@ export function buildBody(M) {
   }
   root.add(tag(frontBumper(M)));
   root.add(tag(boxMesh(B(XF + 0.06, XF + 0.135, 0.44, 0.56, -0.42, 0.42), M.trimGloss, 0.02))); // lower intake
-  for (const s of [-1, 1]) {
-    const z0 = s * 0.05, z1 = s * 0.74;
-    root.add(tag(cylBetween([4.45, topSurfaceY(4.45, z0) + 0.012, z0], [4.3, topSurfaceY(4.3, z1) + 0.012, z1], 0.007, M.trim)));
+  // pivoted windshield wipers (sweep in rain/snow)
+  parts.wipers = [];
+  for (const [z0, len] of [[-0.68, 0.64], [0.02, 0.62]]) {
+    const wy = topSurfaceY(4.44, z0) + 0.014;
+    const plane = new THREE.Group();
+    plane.position.set(4.44, wy, z0);
+    plane.rotation.z = 0.5; // align local YZ plane with the raked windshield glass
+    const arm = new THREE.Group();
+    arm.add(tag(cylBetween([0, 0, 0], [0.008, 0.04, len * 0.55], 0.006, M.trim)));
+    arm.add(tag(cylBetween([0.01, 0.02, len * 0.18], [0.01, 0.06, len], 0.005, M.rubber)));
+    plane.add(arm);
+    root.add(plane);
+    parts.wipers.push(arm);
   }
-  // dashboard (visible through glass)
-  root.add(tag(boxMesh(B(3.86, 4.36, 1.0, 1.29, -0.94, 0.94), M.trim, 0.06)));
-  const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.02, 10, 32), M.trim);
-  wheel.position.set(3.72, 1.42, -0.43);
-  wheel.rotation.y = Math.PI / 2;
-  wheel.rotation.x = 0.45;
-  root.add(tag(wheel));
+  // dashboard, instrument binnacle, MBUX touchscreen & articulated steering wheel
+  root.add(tag(boxMesh(B(3.86, 4.36, 1.0, 1.31, -0.94, 0.94), M.trim, 0.06)));
+  root.add(tag(boxMesh(B(3.86, 4.14, 1.3, 1.54, -0.63, -0.23), M.trim, 0.03))); // binnacle hood
+  root.add(tag(boxMesh(B(3.84, 3.96, 1.29, 1.53, -0.18, 0.18), M.trimGloss, 0.02))); // MBUX bezel
+  root.add(tag(cylBetween([3.92, 1.28, -0.43], [3.68, 1.46, -0.43], 0.042, M.trim))); // steering column
+  const steerPivot = new THREE.Group();
+  steerPivot.position.set(3.68, 1.46, -0.43);
+  steerPivot.rotation.z = -0.42;
+  const steerWheel = new THREE.Group();
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.021, 12, 36), M.trim);
+  rim.rotation.y = Math.PI / 2;
+  steerWheel.add(tag(rim));
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.056, 0.056, 0.042, 20), M.trim);
+  hub.rotation.z = Math.PI / 2;
+  steerWheel.add(tag(hub));
+  for (const a of [0, Math.PI, -Math.PI / 2]) {
+    const sp = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.026, 0.13), M.trim);
+    sp.position.set(0, Math.sin(a) * 0.11, Math.cos(a) * 0.11);
+    sp.rotation.x = -a;
+    steerWheel.add(tag(sp));
+  }
+  const badge = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.003, 8, 24), M.chrome);
+  badge.position.x = -0.023;
+  badge.rotation.y = Math.PI / 2;
+  steerWheel.add(tag(badge));
+  steerPivot.add(steerWheel);
+  root.add(steerPivot);
+  parts.steeringWheel = steerWheel;
+  if (typeof document !== 'undefined') {
+    const cv = document.createElement('canvas');
+    cv.width = 512;
+    cv.height = 192;
+    const ctx = cv.getContext('2d');
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
+    const makeScreen = (x, y, z, w, h, u0, u1) => {
+      const g = new THREE.PlaneGeometry(w, h);
+      const uv = g.attributes.uv;
+      for (let i = 0; i < uv.count; i++) uv.setX(i, u0 + uv.getX(i) * (u1 - u0));
+      const m = new THREE.Mesh(g, mat);
+      m.position.set(x, y, z);
+      m.rotation.set(0, -Math.PI / 2, -0.16, 'YXZ');
+      return tag(m);
+    };
+    root.add(makeScreen(3.855, 1.43, -0.43, 0.34, 0.14, 0, 0.5)); // instrument cluster
+    root.add(makeScreen(3.835, 1.42, 0.0, 0.31, 0.15, 0.5, 1)); // MBUX center screen
+    parts.updateDash = ({ kmh = 0, rpm = 0, gear = 'P', fuelPct = 0.8, soc = 0.9, altW = 0, solarW = 0, tin = 20, limit = null, units = 'mph', warn = '' } = {}) => {
+      ctx.fillStyle = '#070c12';
+      ctx.fillRect(0, 0, 512, 192);
+      const spd = Math.round(units === 'mph' ? kmh * 0.621371 : kmh);
+      // Left half (0..256): Sprinter digital instrument cluster
+      ctx.strokeStyle = '#1b2a38';
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.arc(72, 98, 56, Math.PI * 0.75, Math.PI * 2.25);
+      ctx.stroke();
+      ctx.strokeStyle = rpm > 3600 ? '#ff5b4a' : '#4db8ff';
+      ctx.beginPath();
+      ctx.arc(72, 98, 56, Math.PI * 0.75, Math.PI * (0.75 + 1.5 * Math.min(1, rpm / 4200)));
+      ctx.stroke();
+      ctx.fillStyle = '#e9f4ff';
+      ctx.textAlign = 'center';
+      ctx.font = '700 40px system-ui';
+      ctx.fillText(String(spd), 190, 96);
+      ctx.fillStyle = '#89a7c2';
+      ctx.font = '600 14px system-ui';
+      ctx.fillText(units === 'mph' ? 'MPH' : 'KM/H', 190, 116);
+      ctx.fillStyle = '#e9f4ff';
+      ctx.font = '700 24px system-ui';
+      ctx.fillText((rpm / 1000).toFixed(1), 72, 104);
+      ctx.fillStyle = '#89a7c2';
+      ctx.font = '600 12px system-ui';
+      ctx.fillText('RPM×1k', 72, 122);
+      ctx.fillStyle = '#ffd36b';
+      ctx.font = '700 22px system-ui';
+      ctx.fillText(gear, 134, 42);
+      // Fuel bar
+      ctx.fillStyle = '#1b2a38';
+      ctx.fillRect(148, 142, 84, 9);
+      ctx.fillStyle = fuelPct < 0.15 ? '#ff5b4a' : '#4db8ff';
+      ctx.fillRect(148, 142, 84 * Math.max(0, Math.min(1, fuelPct)), 9);
+      ctx.fillStyle = '#89a7c2';
+      ctx.font = '600 12px system-ui';
+      ctx.fillText(`FUEL ${Math.round(fuelPct * 100)}%`, 190, 168);
+      if (limit) {
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(134, 86, 18, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#d93829';
+        ctx.stroke();
+        ctx.fillStyle = '#111';
+        ctx.font = '700 15px system-ui';
+        ctx.fillText(String(Math.round(units === 'mph' ? limit * 0.621371 : limit)), 134, 91);
+      }
+      // Right half (256..512): MBUX camper & telemetry display
+      ctx.fillStyle = '#0d1824';
+      ctx.fillRect(262, 10, 240, 172);
+      ctx.fillStyle = warn ? '#b82e24' : '#163554';
+      ctx.fillRect(262, 10, 240, 28);
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'left';
+      ctx.font = '700 14px system-ui';
+      ctx.fillText(warn || 'MBUX · CAMPER TELEMETRY', 272, 29);
+      ctx.fillStyle = '#89a7c2';
+      ctx.font = '600 14px system-ui';
+      ctx.fillText('HOUSE LiFePO4', 272, 64);
+      ctx.fillStyle = '#49c98b';
+      ctx.font = '700 22px system-ui';
+      ctx.fillText(`${Math.round(soc * 100)}%`, 272, 90);
+      ctx.fillStyle = '#89a7c2';
+      ctx.font = '600 14px system-ui';
+      ctx.fillText('CABIN', 392, 64);
+      ctx.fillStyle = '#e9f4ff';
+      ctx.font = '700 22px system-ui';
+      ctx.fillText(`${tin.toFixed(1)}°C`, 392, 90);
+      ctx.fillStyle = '#89a7c2';
+      ctx.font = '600 13px system-ui';
+      ctx.fillText(`ALT +${Math.round(altW)} W`, 272, 132);
+      ctx.fillText(`PV +${Math.round(solarW)} W`, 392, 132);
+      ctx.fillStyle = '#1b2a38';
+      ctx.fillRect(272, 148, 220, 10);
+      ctx.fillStyle = '#49c98b';
+      ctx.fillRect(272, 148, 220 * Math.max(0, Math.min(1, soc)), 10);
+      tex.needsUpdate = true;
+    };
+    parts.updateDash();
+  }
   root.add(tag(boxMesh(B(3.15, 3.9, 0.7, 0.98, -0.12, 0.12), M.trim, 0.04))); // centre console
 
   // ── Rear: bumper, step, doors ──────────────────────────────

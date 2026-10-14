@@ -2,17 +2,22 @@
 // build with three.js bundled in, the script and CSS inlined, and every texture and sound embedded as
 // a data URI (see src/assets.js). Output: dist-offline/stealth-sprinter-offline.html
 // Fonts fall back to system fonts when there is no network.
-import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, readdirSync, rmSync, mkdirSync } from 'node:fs';
 import { join, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build } from 'vite';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const out = join(root, 'dist-offline');
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-const bin = join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
-execFileSync(bin, ['build', '--outDir', join(out, 'build'), '--emptyOutDir'], { cwd: root, stdio: 'inherit' });
+await build({
+  root,
+  build: {
+    outDir: join(out, 'build'),
+    emptyOutDir: true,
+  },
+});
 
 const html = readFileSync(join(out, 'build', 'index.html'), 'utf8');
 const jsSrc = html.match(/<script type="module" crossorigin src="\.\/(assets\/[^"]+\.js)"><\/script>/)?.[1];

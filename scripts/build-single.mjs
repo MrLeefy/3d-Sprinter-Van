@@ -3,9 +3,20 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build } from 'vite';
 
+process.env.SINGLE = '1';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dist = join(root, 'dist-single');
+await build({
+  root,
+  build: {
+    outDir: dist,
+    emptyOutDir: true,
+    minify: false,
+    rollupOptions: { external: [/^three(\/.*)?$/] },
+  },
+});
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const three = pkg.dependencies.three.replace(/^[^0-9]*/, '');
 const html = readFileSync(join(dist, 'index.html'), 'utf8');

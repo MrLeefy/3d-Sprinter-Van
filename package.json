@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test tests/*.test.js",
-    "build:single": "SINGLE=1 vite build --outDir dist-single && node scripts/build-single.mjs",
+    "build:single": "node scripts/build-single.mjs",
     "report": "node scripts/report.mjs",
     "build:offline": "node scripts/build-offline.mjs"
   },

@@ -8,7 +8,7 @@ import { humidityRatio } from '../sim/thermal.js';
 import { byId, SYSTEMS, COMPONENTS } from '../data/components.js';
 import { WATER } from '../data/plumbing.js';
 import { VAN } from '../data/vehicle.js';
-import { renderInspector, buildEnergy, updateEnergy, budgetHTML, buildClimate, updateClimate, buildWater, updateWater } from './tabs.js';
+import { renderInspector, actuatorComponents, buildEnergy, updateEnergy, budgetHTML, buildClimate, updateClimate, buildWater, updateWater } from './tabs.js';
 import { buildResources, runResources, buildEngineering, runEngineering } from './analysis.js';
 import { binder, hhmm, esc } from './fmt.js';
 import { FLOW_COLORS } from '../scene/materials.js';
@@ -234,7 +234,7 @@ export class App {
     // mobile sheets
     $('#mLeft').addEventListener('click', () => this.toggleSheet('left'));
     $('#mRight').addEventListener('click', () => this.toggleSheet('right'));
-    // picking
+    // picking & direct 3D mechanism operation
     const cv = this.world.stage.renderer.domElement;
     let down = null;
     cv.addEventListener('pointerdown', (e) => (down = [e.clientX, e.clientY]));
@@ -243,6 +243,18 @@ export class App {
       const hit = this.pickEvent(e);
       if (hit && !this.drivingMode) this.select(hit);
     });
+    cv.addEventListener('dblclick', (e) => {
+      if (this.drivingMode) return;
+      const hit = this.pickEvent(e);
+      if (hit) this.operateHit(hit);
+    });
+    this.world.walker.onInteract = () => {
+      const hit = this.world.pickAt(0, 0) || this.selection;
+      if (hit) {
+        this.select(hit);
+        this.operateHit(hit);
+      }
+    };
     let tipT = 0;
     cv.addEventListener('pointermove', (e) => {
       const now = performance.now();
@@ -257,8 +269,10 @@ export class App {
         const T = this.world.ir.sample(hit.object, hit.point, n);
         if (T != null) temp = ` · ${T.toFixed(1)} °C`;
       }
+      const act = hit ? this.actuatorForHit(hit) : null;
+      const hint = act && !this.drivingMode ? ` · double-click to operate` : '';
       if (name) {
-        tip.textContent = name + temp;
+        tip.textContent = name + temp + hint;
         tip.hidden = false;
         tip.style.left = `${e.clientX + 14}px`;
         tip.style.top = `${e.clientY + 12}px`;
@@ -269,6 +283,29 @@ export class App {
       const b = e.target.closest('[data-t]');
       if (b) this.setHour(parseFloat(b.dataset.t) + 0.02);
     });
+  }
+
+  actuatorForHit(hit) {
+    if (hit?.feature?.act) return actuatorById[hit.feature.act] || null;
+    if (hit?.cid) return ACTUATORS.find((a) => actuatorComponents(a.id).includes(hit.cid)) || null;
+    return null;
+  }
+
+  toggleActuator(id) {
+    const a = actuatorById[id];
+    if (!a) return false;
+    this.setActiveAct(id);
+    const cur = this.values[id] ?? 0;
+    this.targets[id] = cur > 0.5 ? 0 : 1;
+    this.overrides[id] = cur;
+    this.blockedShown.delete(id);
+    return true;
+  }
+
+  operateHit(hit) {
+    const a = this.actuatorForHit(hit);
+    if (!a) return false;
+    return this.toggleActuator(a.id);
   }
 
   pickEvent(e) {
@@ -1045,7 +1082,7 @@ function layoutHTML() {
   <div class="tourcard" id="tourCard" hidden><div class="tc-top"><span class="eyebrow" id="tcStep"></span><button class="tc-x" id="tcClose" aria-label="End tour">×</button></div>
     <h2 class="title" id="tcTitle"></h2><p class="prose" id="tcText"></p>
     <div class="tc-ctl"><button class="iconbtn" id="tcPrev" aria-label="Previous stop">‹</button><button class="iconbtn" id="tcPlay" aria-label="Pause tour">❚❚</button><button class="iconbtn" id="tcNext" aria-label="Next stop">›</button><div class="tc-bar"><i id="tcBar"></i></div></div></div>
-  <div class="walkhud" id="walkHud" hidden><div class="wh-txt"><b>First person</b> · drag to look · W A S D or arrows to walk · Q / E turn · click anything to inspect</div>
+  <div class="walkhud" id="walkHud" hidden><div class="wh-txt"><b>First person</b> · drag to look · W A S D or arrows to walk · Q / E turn · F or double-click to operate doors</div>
     <div class="wh-pad"><button data-pad="t1" aria-label="Turn left">⟲</button><button data-pad="f1" aria-label="Forward">▲</button><button data-pad="t-1" aria-label="Turn right">⟳</button><button data-pad="s-1" aria-label="Step left">◀</button><button data-pad="f-1" aria-label="Back">▼</button><button data-pad="s1" aria-label="Step right">▶</button></div>
     <button class="btn" id="walkExit">Exit · Esc</button></div>
   <div class="drivehud" id="driveHud" hidden></div>

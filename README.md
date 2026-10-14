@@ -11,10 +11,12 @@ access and dependencies. The pipes, cables and ducts are routed in 3D. A coupled
 simulation models heat, humidity, CO₂, battery, water and diesel use. An acceptance suite
 (76 checks) verifies that nothing clashes, every system fits and every rating is respected.
 
+**Live demo:** [https://mrleefy.github.io/3d-Sprinter-Van/](https://mrleefy.github.io/3d-Sprinter-Van/)
+
 ```bash
 npm install
 npm run dev           # interactive viewer at http://localhost:5173
-npm test              # 207 node tests: engineering acceptance, world, towns, routing, drive and crash physics, traffic (node --test)
+npm test              # 222 node tests: engineering acceptance, world, towns, routing, drive, semi, jobs, crash physics, traffic
 npm run report        # regenerate docs/ACCEPTANCE-REPORT.md
 npm run build         # static site in dist/
 npm run build:single  # one-file page: dist-single/stealth-sprinter.html (three.js 0.170.0 from jsDelivr)
@@ -26,7 +28,7 @@ npm run build:offline # fully offline one-file game: dist-offline/stealth-sprint
 | Control | What it shows |
 |---|---|
 | **Master transformation slider** (bottom) | 0 % closed cargo van → 25 % doors open, systems revealed → 50 % living mode (seats swivelled, table out, lounge) → 75 % sleeping + slide-out pod + insulated covers → 100 % full camp (awning, outdoor kitchen, rear-door table & bench). Play or pause anywhere. |
-| **Systems** (left) | Operate any of 25 mechanisms on their own (drawers, fridge, microwave, toilet drawer, hatches, pod, awning…). Interlocks are enforced: the outdoor kitchen needs the rear doors at 270°, and the driver rear door stops at 180° while the pod is out. |
+| **Systems** (left or double-click in 3D) | Operate any of 25 mechanisms from the left panel, the Inspector, or by **double-clicking directly on the 3D component** (doors, drawers, fridge, microwave, toilet drawer, hatches, pod, awning…). Interlocks are enforced: the outdoor kitchen needs the rear doors at 270°, and the driver rear door stops at 180° while the pod is out. |
 | **View** | Normal, X-ray, Cutaway (dollhouse / side / roof) and Exploded. Option to show concealed pipes, cables and ducts. |
 | **Simulation modes** | **Thermal** (heat-flux arrows per envelope element, solar rays, warm/cold air, insulation layers) · **Electrical** (current-proportional flow on every cable) · **Water** (cold, hot, drinking, grey, fill, diesel) · **Ventilation** (labelled fresh, stale, cooking, shower, AC and heater airflows) · **Mechanical** (every hinge, rail, actuator, latch, seal and support) · **Daily living** (an occupant cooks, works, showers, uses the drawer toilet, lounges and converts the van for sleep while the simulation runs) · **Resources** (24 h and multi-day charts). |
 | **Environments** (top) | Hot summer sun, cold winter (−18 °C), heavy rain, humid heat, overnight off-grid, 5 days without hookups. A time-of-day slider and clock drive sun, weather and the live simulation. |
@@ -36,9 +38,9 @@ npm run build:offline # fully offline one-file game: dist-offline/stealth-sprint
 | **Water** | Tank levels, run taps and showers, refill, dump, empty the toilet, simulate a leak (pump lock-out), winterise; freeze-protection status. |
 | **Resources** | Multi-day simulation with battery, temperature, water and air-quality charts, energy by use, and endurance until the first resource runs out. |
 | **Engineering** | Live acceptance tests plus weight & axle loads, capacities, heating/cooling demand, space use, cost estimate, items needing licensed sign-off and labelled assumptions. |
-| **Drive** (top bar) | Everything stows first (travel interlock), then drive an endless, generated Montana-flavoured world — see [Explore the world](#explore-the-world). |
+| **Drive** (top bar) | Everything stows first (travel interlock), then drive an endless, generated Montana-flavoured world in either the **Stealth Sprinter** or a **Class-8 Semi Tractor-Trailer** — see [Explore the world](#explore-the-world). |
 | **Guided tour** (top bar) | Twelve scripted stops — stealth exterior, roof, service garage, live power, galley, wet bath, sealed ventilation, infrared, slide-out pod, full camp, daily living and honest limits. Play, pause or step. |
-| **Walk inside** | First-person at eye height: drag to look, W A S D / arrows / on-screen pad to walk. Collisions come from the component catalogue, so the walk respects the real aisle. Click anything to inspect it. |
+| **Walk inside** | First-person at eye height: drag to look, W A S D / arrows / on-screen pad to walk, **F** or double-click to operate doors and mechanisms. Open the wet-bath door to step inside, or open the sliding door to step down onto the campsite patio. |
 | **Infrared camera** | Every surface shaded by its estimated temperature (ironbow palette, auto-ranged scale): sol-air heating, night-sky cooling, U-value losses, stratified cabin air and live appliance heat. Hover for °C. |
 | **Photo mode & graphics** | Press **H** to hide the panels. Graphics: High (ambient occlusion, bloom, 4K shadows), Medium, Low or Lite, switched live and remembered; an automatically chosen tier steps down if the frame rate drops. |
 
@@ -101,6 +103,13 @@ as flavour; it is not a map. Everything is pure JavaScript you can test (`src/wo
   for a waypoint arrow. "Nearest fuel / water" shortcuts.
 - **Passport**: stamps for every settlement, roadside discoveries, 17 achievements with cash
   rewards and a trip log — all saved in the browser.
+- **Semi truck & freight job board** (**Jobs** button): switch between the Camper Van and a
+  Class-8 sleeper tractor (`src/sim/truck.js`, `src/scene/truck.js`) with 6 articulated trailer
+  types (dry van, reefer, flatbed, tanker, log bunks, intermodal container), 10-speed manual or
+  automated gearbox (**Z / X** to shift, **G** auto/manual), air-brake reservoir with compressor
+  cut-in/out and brake fade, **J** Jake brake, **P** parking brake and **U** fifth-wheel coupling.
+  Take freight contracts between town depots (including fragile, urgent and hazmat loads) and back
+  into the glowing dock bay to get paid.
 
 ### Driving controls
 
@@ -109,15 +118,19 @@ as flavour; it is not a map. Everything is pure JavaScript you can test (`src/wo
 | **W / ↑**, **S / ↓** | Go, brake (hold at a stop to back up) |
 | **A D / ← →** | Steer — smoothed so taps are gentle |
 | **Space** · **R** · **V**, **+ −** · **B** · **T** · **Q** | Handbrake · Drive/Reverse · cruise control · speed limiter (posted limits) · back on the nearest road · horn |
-| **C** · **L** · **M** · **E** | Camera (chase, cockpit, orbit, cinematic) · lights · map · use the service you are stopped at |
+| **C** · **L** · **M** · **E** | Camera (chase, cockpit, orbit, cinematic, plus trailer cam on the semi) · lights · map · use the service you are stopped at |
+| **J** · **P** · **U** · **G** · **Z / X** | *(Semi)* Jake brake · parking brake · couple/uncouple trailer · auto/manual · shift down/up |
 | Touch | Drag anywhere on the left half to steer, hold Go or Brake; optional tilt steering |
 | Gamepad | Stick steers, triggers go/brake, A handbrake, B drive/reverse, Y camera, X lights, bumpers cruise/limiter, Start back on road |
 
-The ⚙ panel has **Easy / Standard / Pro** driving aids (Easy adds lane keeping with curve preview,
-traction and stability control, soft pedals and eases off before curves that are too tight),
-steering sensitivity, camera shake, mph or km/h, engine volume, vibration, graphics tier and a
-**scenery season** selector (Auto follows the scenario). Dust, snow powder, flung mud, spray and
-tyre smoke come off the wheels; skid marks and ruts are left on the ground.
+The ⚙ panel has **Camper / Semi** vehicle selection, **Easy / Standard / Pro** driving aids (Easy
+adds lane keeping with curve preview, traction and stability control, soft pedals and eases off
+before curves that are too tight), steering sensitivity, camera shake, mph or km/h, engine volume,
+vibration, graphics tier and a **scenery season** selector (Auto follows the scenario). Both
+vehicles feature a **Cockpit** camera with a rotating steering wheel and live canvas-rendered
+dashboard instruments (plus weather-reactive windshield wipers and a live MBUX camper telemetry
+screen in the Sprinter). Dust, snow powder, flung mud, spray and tyre smoke come off the wheels;
+skid marks and ruts are left on the ground.
 
 ### Power and sound
 

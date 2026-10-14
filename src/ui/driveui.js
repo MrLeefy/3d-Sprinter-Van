@@ -542,6 +542,7 @@ export class DriveUI {
       this.$('#dhFuel').style.width = `${Math.round(Math.min(1, fuelPct) * 100)}%`;
       this.$('#dhFuelT').textContent = `${fuelL.toFixed(0)} L`;
       if (semi) this.tickSemi();
+      else this.tickVanWarn(fuelPct);
       const fc = this.$('#dhFuelChip');
       fc.firstElementChild.textContent = String(Math.round(Math.min(1, fuelPct) * 100));
       fc.classList.toggle('low', fuelPct < 0.15);
@@ -579,6 +580,22 @@ export class DriveUI {
     const town = D.surface.kind === 'street' ? 1 : 0;
     const winter = this.world.terrain.season.u.uIce.value > 0.5 || this.world.terrain.season.u.uSnow?.value > 0.5;
     sound.sfx.ambience({ speed: Math.abs(D.v), day, rain: st.rain.visible ? 1 : 0, snow: st.snow.visible ? 1 : 0, town, summer: winter ? 0.15 : 1, cab: D.camMode === 'cockpit' ? 1 : 0 });
+  }
+
+  /** Camper van warnings on the instrument cluster banner (4 Hz). */
+  tickVanWarn(fuelPct) {
+    const D = this.D;
+    let w = '';
+    if (D.rolledVan) w = 'ROLLED OVER — press T';
+    else if (D.dmg.engineDead) w = 'ENGINE OUT — press T';
+    else if ((D.vd?.lam > 0.9 || D.vd?.tip > 0.015) && Math.abs(D.v) > 6) w = 'TWO WHEELS LIFTING — SLOW DOWN';
+    else if (D.dmg.zone.front > 0.45) w = 'RADIATOR DAMAGED — REDUCED POWER';
+    else if (Math.abs(D.dmg.pull) > 0.025) w = 'STEERING BENT — PULLING';
+    else if (fuelPct < 0.12) w = 'LOW FUEL';
+    else if (D.parkBrake) w = 'PARKING BRAKE';
+    const el = this.$('#dhWarn');
+    el.hidden = !w;
+    el.textContent = w;
   }
 
   /** Truck gauges and warnings (4 Hz). */

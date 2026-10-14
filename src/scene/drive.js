@@ -774,6 +774,20 @@ export class Driver {
       w.wheel.rotation.z = (w.side > 0 ? -1 : 1) * this.spin;
       if (w.front) w.hub.rotation.y = this.delta;
     }
+    if (W.body.parts.steeringWheel) {
+      W.body.parts.steeringWheel.rotation.x = -(this.delta / VAN_DYN.maxSteer) * Math.PI * 1.4;
+    }
+    if (W.body.parts.wipers?.length) {
+      const precip = W.stage.rain?.visible || W.stage.snow?.visible;
+      if (precip && this.active && !this.engineOut) {
+        this.wiperT = (this.wiperT || 0) + dt * (W.stage.rain?.visible ? 4.8 : 3.2);
+        const sweep = (1 - Math.cos(this.wiperT)) * 0.5;
+        for (const wp of W.body.parts.wipers) wp.rotation.x = -sweep * 1.18;
+      } else if (this.wiperT) {
+        this.wiperT = 0;
+        for (const wp of W.body.parts.wipers) wp.rotation.x = 0;
+      }
+    }
     // lights
     const night = W.stage.night || W.stage.sunScene.y < 0.08;
     const beamsOn = this.active && (this.lights === 'on' || (this.lights === 'auto' && night));
@@ -1103,8 +1117,8 @@ export class Driver {
     } else if (this.camMode === 'cockpit') {
       const vr = this.world.vanRoot;
       vr.updateMatrixWorld();
-      cam.position.copy(vr.localToWorld(new THREE.Vector3(3.42, 1.93, -0.43)));
-      const t = vr.localToWorld(new THREE.Vector3(14, 1.2, -0.43 + this.delta * 3));
+      cam.position.copy(vr.localToWorld(new THREE.Vector3(3.12, 1.78, -0.43)));
+      const t = vr.localToWorld(new THREE.Vector3(14, 1.05, -0.43 + this.delta * 3));
       ctl.target.copy(t);
       cam.lookAt(t);
     } else if (this.camMode === 'cinematic') {

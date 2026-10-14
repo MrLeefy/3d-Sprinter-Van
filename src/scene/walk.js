@@ -26,12 +26,15 @@ export class Walker {
     this.boxes = COMPONENTS.filter((c) => c.box && !SKIP.has(c.id) && !['roof', 'underbody', 'through-roof'].includes(c.placement) && c.zone !== 'exterior' && c.box.y[0] < y1 && c.box.y[1] > y0)
       .map((c) => ({ id: c.id, x0: c.box.x[0] - R, x1: c.box.x[1] + R, z0: c.box.z[0] - R, z1: c.box.z[1] + R }));
     this.onKey = (e) => {
-      if (!this.on) return;
+      if (!this.on || e.target.closest?.('input, select, textarea')) return;
       const k = e.key.toLowerCase();
       if (['w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
         if (e.type === 'keydown') this.keys.add(k);
         else this.keys.delete(k);
         e.preventDefault();
+      } else if (k === 'f' && e.type === 'keydown' && !e.repeat) {
+        e.preventDefault();
+        this.onInteract?.();
       }
     };
     window.addEventListener('keydown', this.onKey);
@@ -61,8 +64,25 @@ export class Walker {
 
   blocked(x, z) {
     const I = INTERIOR;
-    if (x < I.x0 + R || x > 2.95 || Math.abs(z) > I.wallZ - R) return true;
-    for (const b of this.boxes) if (x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1) return true;
+    const vals = this.world.rig?.values || {};
+    const doorOpen = (vals.slidingDoor ?? 0) > 0.6;
+    const bathOpen = (vals.wetbathDoor ?? 0) > 0.6;
+    const inDoorway = doorOpen && x > 1.58 && x < 2.52 && z > I.wallZ - R && z < 1.25;
+    const insideShell = x >= I.x0 + R && x <= 2.95 && Math.abs(z) <= I.wallZ - R;
+    if (!insideShell && !inDoorway) {
+      // Outside on the campsite ground: allow walking around the van if the sliding door is open (or already outside)
+      if (!doorOpen && Math.abs(this.pos.z) <= I.wallZ) return true;
+      if (x < -5.5 || x > 8.0 || z < -5.0 || z > 5.5) return true;
+      // Outer van body footprint
+      if (x > -1.85 && x < 5.45 && Math.abs(z) < 1.18) return true;
+      // Deployed outdoor kitchen block
+      if ((vals.outdoorKitchen ?? 0) > 0.3 && x > -2.75 && x < -1.55 && z > 0.05 && z < 0.95) return true;
+      return false;
+    }
+    for (const b of this.boxes) {
+      if (b.id === 'wetbath' && bathOpen && x > -0.02 && x < 0.48 && z > 0.0 && z < 0.71) continue;
+      if (x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1) return true;
+    }
     return false;
   }
 
@@ -111,6 +131,10 @@ export class Walker {
     this.yaw += t * 1.6 * dt;
     const moved = f || s ? this.tryMove(f * SPEED * dt, s * SPEED * dt * 0.8) : 0;
     this.bob += moved * 9;
+    // Floor height: transition smoothly down the entry step when stepping outside the sliding door
+    const inside = this.pos.x >= INTERIOR.x0 && this.pos.x <= 3.05 && Math.abs(this.pos.z) <= 0.92;
+    const targetY = inside ? INTERIOR.floorY : this.pos.z < 1.18 && this.pos.x > 1.5 && this.pos.x < 2.6 ? INTERIOR.floorY * 0.5 : 0;
+    this.pos.y += (targetY - this.pos.y) * Math.min(1, dt * 10);
     const cam = this.world.stage.camera;
     // the van may sit on a slope: walk on its floor, keep the horizon level
     this.world.vanRoot.updateMatrixWorld();

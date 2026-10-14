@@ -1,6 +1,7 @@
 // Material library: CC0 photographic PBR sets (Poly Haven, public/textures) for wood, leather,
 // fabric and ground, plus procedural canvas textures for everything else.
 import * as THREE from 'three';
+import { asset } from '../assets.js';
 
 const cache = new Map();
 
@@ -14,7 +15,7 @@ export const TEXTURE_BASE = { url: 'textures/' };
 function srcTex(file, srgb) {
   if (!srcCache.has(file)) {
     const entry = { tex: null, loaded: false, users: [] };
-    entry.tex = loader.load(TEXTURE_BASE.url + file, () => {
+    entry.tex = loader.load(asset(TEXTURE_BASE.url + file), () => {
       entry.loaded = true;
       for (const u of entry.users) u.needsUpdate = true;
     });

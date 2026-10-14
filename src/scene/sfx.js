@@ -2,6 +2,8 @@
 // public/audio/CREDITS.md) layered over the synthesised engines in audio.js. Everything is loaded
 // lazily; if a file is missing the layer simply stays silent. Ambience is mixed live from the
 // scene: wind with speed, birdsong by day, crickets at night, rain, and impacts scaled by speed.
+import { asset } from '../assets.js';
+
 const BASE = 'audio/';
 const FILES = ['wind', 'birds', 'crickets', 'rain', 'morning', 'blinker', 'parkbrake', 'doorclose', 'start', 'stop', 'glass0', 'plate0',
   'crashHeavy0', 'crashHeavy1', 'crashHeavy2', 'crashMed0', 'crashMed1', 'wood0', 'wood1', 'thud0', 'thud1'];
@@ -29,7 +31,7 @@ export class Sfx {
     this.loading = true;
     await Promise.all(FILES.map(async (n) => {
       try {
-        const r = await fetch(`${BASE}${n}.ogg`);
+        const r = await fetch(asset(`${BASE}${n}.ogg`));
         if (!r.ok) return;
         const b = await this.ctx.decodeAudioData(await r.arrayBuffer());
         this.buf.set(n, b);

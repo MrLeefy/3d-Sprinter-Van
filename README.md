@@ -18,6 +18,7 @@ npm test              # 207 node tests: engineering acceptance, world, towns, ro
 npm run report        # regenerate docs/ACCEPTANCE-REPORT.md
 npm run build         # static site in dist/
 npm run build:single  # one-file page: dist-single/stealth-sprinter.html (three.js 0.170.0 from jsDelivr)
+npm run build:offline # fully offline one-file game: dist-offline/stealth-sprinter-offline.html (double-click to play)
 ```
 
 ## What you can do in the viewer

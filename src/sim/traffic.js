@@ -145,7 +145,7 @@ export function straightFor(curv, step, s, dir, look, kMax = 1 / 650) {
 // ── Lane changing and overtaking ──────────────────────────────────────────────
 /** Gap acceptance for moving into a lane: neither we nor the new follower may need to brake hard. */
 export function mergeSafe({ pSelf, pFollow = null, v, vAhead = 0, gapAhead = 1e9, vBehind = 0, gapBehind = 1e9, bSafe = 3.2 }) {
-  if (gapAhead < pSelf.s0 + 0.35 * v || gapBehind < 4) return false;
+  if (gapAhead < Math.max(7, pSelf.s0 + 0.5 * v) || gapBehind < Math.max(5, 0.2 * v)) return false;
   const aSelf = idmAccel(pSelf, v, gapAhead, vAhead, v + 4);
   if (aSelf < -bSafe) return false;
   const pf = pFollow || pSelf;

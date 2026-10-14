@@ -15,9 +15,9 @@ const TRAILER_PAINT = [[0.95, 0.95, 0.93], [0.9, 0.9, 0.88], [0.8, 0.82, 0.85], 
 /** Model → the mesh parts that make it up (dx = offset along the vehicle's forward axis). */
 const PARTS = ['sedan', 'suv', 'hatch', 'van', 'pickup', 'tractor', 'dryvan', 'tanker', 'flatbed'];
 const PART_OF = (kind) => (kind <= 4 ? [[kind, 0]] : kind === 5 ? [[5, 0]] : [[5, 0], [kind + 0, 0.15]]); // 6..8 trailers use the part index = kind
-const HI_RADIUS = (kind) => (kind <= 4 ? 55 : 80);
+const HI_RADIUS = (kind) => (kind <= 4 ? 55 : 70);
 const HI_CAP = [40, 40, 40, 40, 40, 10, 8, 8, 8];
-const HI_TRI_BUDGET = 420000;
+const HI_TRI_BUDGET = 360000;
 const LO_CAP = 700;
 
 /** Collision circles [forward offset, radius] for a parked vehicle (the van drives into them like any obstacle). */
@@ -25,9 +25,9 @@ export function carCircles(kind) {
   if (kind === 3) return [[1.9, 1.0], [0, 1.0], [-1.9, 1.0]];
   if (kind === 4) return [[2.1, 0.97], [0.4, 0.97], [-1.5, 0.97]];
   if (kind <= 4) return [[1.4, 0.92], [-1.1, 0.92]];
-  const tractor = [[6.3, 1.3], [4.4, 1.3], [2.5, 1.3], [0.7, 1.3]];
+  const tractor = [[6.3, 1.3], [4.4, 1.3], [2.5, 1.3], [0.7, 1.3], [-1.2, 1.3]];
   if (kind === 5) return tractor;
-  return [...tractor, [-2.2, 1.35], [-4.6, 1.35], [-7, 1.35], [-9.4, 1.35], [-11.8, 1.35], [-14.2, 1.35]];
+  return [...tractor, [-3.6, 1.35], [-6, 1.35], [-8.4, 1.35], [-10.8, 1.35], [-13.2, 1.35], [-14.8, 1.35]];
 }
 
 // ── Low-detail stand-ins (box models in the same vertex format as vehicles.js) ──────────────
@@ -201,7 +201,7 @@ export class ParkedVehicles {
       const kind = list[i][4], parts = PART_OF(kind);
       if (parts.some(([p]) => hiN[p] >= HI_CAP[p])) continue;
       let cost = 0;
-      for (const [p] of parts) cost += this.hiTris[p] || (p <= 4 ? 10500 : p === 5 ? 15000 : 12000);
+      for (const [p] of parts) cost += this.hiTris[p] || (p <= 4 ? 11000 : p === 5 ? 34000 : 21000);
       if (cost > budget) continue;
       budget -= cost;
       useHi[i] = 1;

@@ -105,7 +105,9 @@ function lotRibbon(e, k, side, ox, oz, dy, P, N, R, I) {
       R.push(o, e.ss[kk], cls, Math.max(0.01, w * 2));
     }
   }
-  I.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+  // wind upward on both sides (the material is double sided, so a downward face would be lit from below)
+  if (side > 0) I.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+  else I.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
 }
 const lotCls = (e, k, side) => {
   const s = (e.ss[k] + e.ss[k + 1]) / 2;

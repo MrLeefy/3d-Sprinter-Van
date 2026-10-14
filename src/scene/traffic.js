@@ -234,7 +234,7 @@ export class Traffic {
     const v = {
       id: this.id++, e, s, dir, kind, K, lane, lat, vmax, temper, v: vmax * 0.96, a: 0,
       p: S.driverParams(kind, temper), react: rnd() < 0.05 ? 1.0 : 0.15 + rnd() * 0.3,
-      latFrom: lat, latTo: lat, chT: 0, chDur: 3, mode: 'cruise', signal: 0, sigT: 0, passing: false, opp: false, passLead: null, abort: false,
+      latFrom: lat, latTo: lat, chT: 0, chDur: 3, mode: 'cruise', signal: 0, sigT: 0, passing: false, opp: false, passLead: null, abort: false, push: false,
       followTime: 0, idle: 3 + rnd() * 3, decT: rnd() * 0.4, limT: 0, curveLim: Infinity, townLim: Infinity, townD: Infinity, latRate: 0, brakeOn: false,
       honk: S.makeHonk(), wreck: 0, ph: rnd() * 6.28, pendingLat: lat, pendingSide: 0, ownScan: null,
       x: 0, z: 0, y: 0, yaw: 0, pitch: 0, pitchT: 0, hi: false, thetaT: 0, tx: 0, tz: 0, fx: 1, fz: 0, rx: 0, rz: 1,
@@ -434,8 +434,10 @@ export class Traffic {
       v.sigT = v.abort ? 0.2 : 1.1;
     } else if (!multi && v.opp) {
       // abort a pass when something comes at us and we are not yet clear of the vehicle we are passing
+      // (only while we are still clearly behind it; alongside, commit and accelerate past instead)
       const danger = own.onc.gap < (v.v + own.onc.v) * 4.6 + 25;
-      if (danger) v.abort = true;
+      if (danger && t.same.gap > 8) v.abort = true;
+      else v.push = danger;
     }
     void D;
   }
@@ -450,7 +452,7 @@ export class Traffic {
     }
     const toEnd = v.dir > 0 ? e.len - v.s : v.s;
     const endLim = S.approachLimit(7, toEnd - 50, 1.4);
-    let v0 = Math.min(v.vmax, v.curveLim, v.townLim, endLim);
+    let v0 = Math.min(v.vmax * (v.push && v.opp ? 1.15 : 1), v.curveLim, v.townLim, endLim);
     // perceive
     const hw = K.w / 2 + 0.1;
     const own = this.scan(v, v.lat - hw, v.lat + hw, v.ownScan || (v.ownScan = makeScan()), 420);
@@ -527,6 +529,7 @@ export class Traffic {
           v.passing = false;
           v.passLead = null;
           v.abort = false;
+          v.push = false;
           v.idle = 0;
         }
       }
@@ -629,7 +632,7 @@ export class Traffic {
     const ph = this.pcx * hx + this.pcz * hz; // cosine of the angle between the two headings
     const uA = v.v, uP = D.v * ph; // speeds along the AI's heading
     const along = nx * hx + nz * hz; // > 0: the player is in front of the AI
-    const rel = D.v * (this.pcx * nx + this.pcz * nz) - v.v * along; // player speed along the normal relative to the AI
+    const rel = D.v * (this.pcx * nx + this.pcz * nz) - (v.v * v.fx + v.latRate * v.rx) * nx - (v.v * v.fz + v.latRate * v.rz) * nz; // normal speed of the player relative to the AI
     const closing = Math.max(0, -rel);
     // positional separation: the AI is bound to its path, so the player gives most of the way
     const push = best + 0.02;
@@ -659,6 +662,7 @@ export class Traffic {
   hit(v, D, closing, mA, mP, byAI) {
     if (closing < 1.2) return;
     this.stats.crashes++;
+    this.stats.last = { kind: v.kind, closing: +closing.toFixed(1), byAI, mode: v.mode, lat: +v.lat.toFixed(2), opp: v.opp, vAI: +v.v.toFixed(1), clock: +this.clock.toFixed(1) };
     if (D.vehicle === 'semi') {
       D.rig.damage = Math.min(100, D.rig.damage + S.impactDamage(closing, mA, mP));
       D.hitSpeed = closing;

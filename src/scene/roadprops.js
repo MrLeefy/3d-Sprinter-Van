@@ -7,7 +7,7 @@ import { lotWidthAt } from '../world/highway.js';
 
 export const lin = (c) => c.map((v) => Math.pow(v, 2.2));
 export const WOOD = lin([0.33, 0.24, 0.16]), DARK = lin([0.08, 0.08, 0.09]), STEEL = lin([0.5, 0.52, 0.55]), STONE = lin([0.5, 0.48, 0.44]), WIRE = lin([0.05, 0.05, 0.06]);
-const CONCRETE = lin([0.62, 0.61, 0.58]), ASPHALT = lin([0.13, 0.13, 0.14]), RAIL = lin([0.7, 0.72, 0.74]), EARTH = lin([0.36, 0.3, 0.22]), GRAVEL = lin([0.55, 0.5, 0.42]);
+const CONCRETE = lin([0.62, 0.61, 0.58]), ASPHALT = lin([0.13, 0.13, 0.14]), RAIL = lin([0.7, 0.72, 0.74]), EARTH = lin([0.36, 0.3, 0.22]), FILL = lin([0.5, 0.43, 0.27]), GRAVEL = lin([0.55, 0.5, 0.42]);
 const RED = lin([0.5, 0.14, 0.1]), WHITE = lin([0.9, 0.88, 0.84]), YELLOW = lin([0.85, 0.66, 0.1]);
 
 /** Oriented box: local u runs along the facing's right vector t, d along its normal n. */
@@ -188,7 +188,14 @@ export function overpass(ctx, ov) {
         for (const sg of [-1, 1]) {
           const k = sg < 0 ? 'l' : 'r', gk = sg < 0 ? 'gl' : 'gr';
           if (prev.y < prev[gk] && cur.y < cur[gk]) continue; // buried in a cut
-          gb.quad([prev[k][0], prev[gk], prev[k][1]], [cur[k][0], cur[gk], cur[k][1]], [cur[k][0], cur.y, cur[k][1]], [prev[k][0], prev.y, prev[k][1]], [tan[0] * sg, 0, tan[1] * sg], EARTH, K.plain, 8);
+          // fill slope: 1:1.8 from the deck edge down to the ground, along the road direction
+          const foot = (q) => {
+            const run = Math.max(0, q.y - q[gk]) * 1.8 * sg;
+            return [q[k][0] + tan[0] * run, q[k][1] + tan[1] * run];
+          };
+          const fa = foot(prev), fb = foot(cur);
+          const ln = Math.hypot(1.8, 1);
+          gb.quad([fa[0], prev[gk], fa[1]], [fb[0], cur[gk], fb[1]], [cur[k][0], cur.y, cur[k][1]], [prev[k][0], prev.y, prev[k][1]], [(tan[0] * sg * 1) / ln, 1 / ln * 1.8 * 0.55, (tan[1] * sg * 1) / ln], FILL, K.plain, 8);
           const mx = (prev[k][0] + cur[k][0]) / 2, mz = (prev[k][1] + cur[k][1]) / 2;
           const my = (prev.y + cur.y) / 2;
           obox(gb, mx, mz, my, my + 0.8, segL / 2 + 0.05, 0.15, across, CONCRETE, K.plain, 8);
@@ -260,7 +267,7 @@ export function restArea(ctx, lot) {
   }
   obox(gb, sx, sz, by + 2.7, by + 3.0, 3.0, 2.1, F.yaw, lin([0.4, 0.3, 0.2]), K.plain, 5, roof);
   for (const u of [-16, -24, 20]) {
-    const [tx, tz] = F.xz(u + (u === -16 ? 0 : 0), side * (hw + W0 + 2.6));
+    const [tx, tz] = F.xz(u, side * (hw + W0 + 2.6));
     obox(gb, tx, tz, by + 0.7, by + 0.78, 1.0, 0.4, F.yaw, WOOD, K.plain, 5, WOOD);
     for (const sd of [-1, 1]) {
       const [lx, lz] = F.xz(u + sd * 0.7, side * (hw + W0 + 2.6));

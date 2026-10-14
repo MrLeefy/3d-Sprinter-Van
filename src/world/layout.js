@@ -394,7 +394,7 @@ function urban(L, world, n) {
   L.lot('watertower', wtx, wtz, 9, 9, { h: 30, r: 4.5, pal: 7 });
   rv(wtx, wtz, 9, 9);
   const railZ = railM != null ? cz + railM * G.bz : null;
-  const avenueXs = [...hasV.keys()].map((k) => ({ x: cx + k * G.bx, w: wV(k) }));
+  const avenueXs = [...hasV.keys()].map((k) => ({ x: cx + k * G.bx, c: cx + k * G.bx, w: wV(k) }));
   if (!big) {
     // grain elevator complex on the railway (or just south of Main St when the town has no line)
     const ex = cx + side * (Rp * 0.9 - 28);
@@ -581,8 +581,8 @@ function urban(L, world, n) {
           t = Math.max(t + 1, q.c + q.w / 2 + 7);
           continue;
         }
-        const px = horiz ? c : line + sd * (w / 2 - (ang ? 2.4 : 1.2)), pz = horiz ? line + sd * (w / 2 - (ang ? 2.4 : 1.2)) : c;
-        if (rng() < p * clamp(1.3 - rhoAt(px, pz), 0, 1) && rhoAt(px, pz) < 0.93) {
+        const px = horiz ? c : line + sd * (w / 2 - (ang ? 2.7 : 1.2)), pz = horiz ? line + sd * (w / 2 - (ang ? 2.7 : 1.2)) : c;
+        if (rng() < p * clamp(1.3 - rhoAt(px, pz), 0, 1) && rhoAt(px, pz) < 0.93 && !L.lots.some((l) => l.solid && Math.abs(l.x - px) < l.w / 2 + 3.2 && Math.abs(l.z - pz) < l.d / 2 + 3.2)) {
           let rot;
           if (ang) rot = sd > 0 ? -Math.PI / 4 : (3 * Math.PI) / 4; // east–west streets only
           else rot = horiz ? (sd > 0 ? 0 : Math.PI) : sd > 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -619,7 +619,7 @@ function urban(L, world, n) {
 function village(L, world, n) {
   const rng = L.rng;
   const { x: cx, z: cz, Rp } = n;
-  const wMain = 12, wDepot = 10, wRail = 8;
+  const wMain = 12, wDepot = 11, wRail = 8;
   L.street(cx - Rp, cz, cx + Rp, cz, wMain, 'main', 'Main St');
   const half = n.Rz;
   L.street(cx, cz - half, cx, cz + half, wDepot, 'minor', 'Depot Rd');
@@ -644,7 +644,7 @@ function village(L, world, n) {
   if (hash2(n.i, n.j, 100) < 0.5) {
     const dx = cx - 30;
     L.lot('diner', dx, cz + wMain / 2 + 11, 14, 9, { floors: 1, h: 4, pal: 0, roof: 'flat', sign: pick(rng, ['Depot Diner', 'Big Sky Diner', 'Rail Stop Cafe']) }).facing = 'z-';
-    bayRow(L, rng, dx - 7.25, cz + wMain / 2 + 4.5 - 2.9 + 0.3, 5, 2.9, 5.4, 0.5);
+    bayRow(L, rng, dx - 7.25, cz + wMain / 2 + 3.5, 5, 2.9, 5.4, 0.5);
   }
   for (const sd of [-1, 1]) {
     let x = cx - Rp + 14;
